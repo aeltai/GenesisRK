@@ -4,6 +4,7 @@ import { fetchRancherVersions, fetchStep1OptionsMerged, generate, exportImageLis
 import type { Step1OptionsResponse, GenerateRequest, GenerateResponse } from './types/genesis'
 import Step1Form from './components/Step1Form.vue'
 import Step3Tree from './components/Step3Tree.vue'
+import DocsViewer from './components/DocsViewer.vue'
 
 const VERSION = '0.1'
 const theme = ref<'dark' | 'light'>('dark')
@@ -27,10 +28,13 @@ function toggleTheme() {
 const step = ref<'step1' | 'loading' | 'step3'>('step1')
 // Hash-based page: '' = app, 'docs' = documentation (separate page)
 const page = ref<'app' | 'docs'>(
-  typeof window !== 'undefined' && window.location.hash.slice(1) === 'docs' ? 'docs' : 'app'
+  typeof window !== 'undefined' && (window.location.hash.slice(1) === 'docs' || window.location.hash.startsWith('#docs/'))
+    ? 'docs'
+    : 'app'
 )
 function updatePageFromHash() {
-  page.value = window.location.hash.slice(1) === 'docs' ? 'docs' : 'app'
+  const h = window.location.hash.slice(1)
+  page.value = h === 'docs' || h.startsWith('docs/') ? 'docs' : 'app'
 }
 function goBackToApp() {
   window.location.hash = ''
@@ -223,67 +227,7 @@ function backToStep1() {
 <template>
   <div class="app">
     <template v-if="page === 'docs'">
-      <div class="docs-page">
-        <div class="docs-page-header">
-          <a href="#" class="docs-back" @click.prevent="goBackToApp">← Back to GenesisRK</a>
-          <h1 class="docs-page-title">Documentation</h1>
-        </div>
-        <div class="docs-panel">
-          <div class="docs-body">
-            <h3>Overview</h3>
-            <p>
-              <strong>GenesisRK</strong> generates image lists for Rancher air-gapped deployments.
-              It fetches metadata from multiple sources to build a comprehensive, customizable list of
-              container images and Helm charts needed for your specific deployment.
-            </p>
-
-            <h3>Step 1: Source &amp; Options</h3>
-            <table class="docs-table">
-              <tr><td><strong>Rancher version</strong></td><td>Select the target Rancher Manager version. Versions are fetched from <a href="https://github.com/rancher/rancher/tags" target="_blank">GitHub tags</a>. Enable "Include pre-release" for RC/alpha/beta versions.</td></tr>
-              <tr><td><strong>Image list source</strong></td><td><em>Community</em> fetches K3s/RKE2 image lists from GitHub releases. <em>Rancher Prime</em> fetches from <code>prime.ribs.rancher.io</code> (curated/certified lists, includes <code>rancher-images.txt</code>). Both use the same KDM and chart repos.</td></tr>
-              <tr><td><strong>Application Collection</strong></td><td>Optionally include charts from <code>dp.apps.rancher.io</code> (Rancher Application Collection marketplace). Requires API credentials.</td></tr>
-              <tr><td><strong>Distros</strong></td><td>Select Kubernetes distributions: <em>K3s</em>, <em>RKE2</em>, and/or <em>RKE1</em> (legacy, Rancher &lt;2.12 only).</td></tr>
-              <tr><td><strong>Kubernetes versions</strong></td><td>
-                Versions from two sources:<br/>
-                &bull; <strong>KDM</strong> (Kontainer Driver Metadata) &mdash; officially supported by this Rancher release, fetched from <code>releases.rancher.com</code><br/>
-                &bull; <strong>GitHub</strong> <span style="opacity:0.7">[GH]</span> &mdash; newer releases from <a href="https://github.com/rancher/rke2/releases" target="_blank">rancher/rke2</a> / <a href="https://github.com/k3s-io/k3s/releases" target="_blank">k3s-io/k3s</a> not yet in KDM<br/>
-                Select "All" for KDM versions, or pick specific versions.
-              </td></tr>
-              <tr><td><strong>Platform</strong></td><td><em>Linux only</em> or <em>Linux + Windows</em> (adds Windows node images for RKE2/K3s).</td></tr>
-              <tr><td><strong>CNI</strong></td><td>Container Network Interface plugin: Canal, Calico, Cilium, Flannel (K3s only), or All.</td></tr>
-              <tr><td><strong>Load Balancer / Ingress</strong></td><td>K3s: Klipper (ServiceLB) and/or Traefik. RKE2: NGINX Ingress and/or Traefik.</td></tr>
-            </table>
-
-            <h3>Step 2: Generate</h3>
-            <p>The backend fetches data from these sources:</p>
-            <ul>
-              <li><strong>KDM</strong> &mdash; <code>releases.rancher.com/kontainer-driver-metadata/</code> for compatible K8s versions and their system images</li>
-              <li><strong>Chart repositories</strong> &mdash; Rancher charts (<code>charts.rancher.io</code> or <code>charts.rancher.com</code>) for Helm chart images</li>
-              <li><strong>GitHub Releases API</strong> &mdash; RKE2/K3s releases for additional version information and release notes</li>
-              <li><strong>Application Collection API</strong> &mdash; <code>api.apps.rancher.io</code> for marketplace charts (if enabled)</li>
-            </ul>
-
-            <h3>Step 3: Groups &amp; Charts</h3>
-            <p>The generated tree has two main groups:</p>
-            <ul>
-              <li><strong>Essentials</strong> &mdash; Core Rancher components, selected distro images, CNI plugin, load balancer/ingress. Pre-selected by default.</li>
-              <li><strong>AddOns</strong> &mdash; Optional charts grouped by category: Monitoring, Logging, Backup, Storage, Security, CIS, Provisioning (cloud operators), Cluster API, OS Management, Support.</li>
-            </ul>
-            <p>Each group shows charts and their container images. You can toggle individual charts or images. The preview panels show:</p>
-            <ul>
-              <li><strong>Charts</strong> &mdash; with legend tags: [R] Rancher, [C] CNI, [RKE2] distro, [LB] ingress, [A] addon</li>
-              <li><strong>Images</strong> &mdash; with group tags and origin chart name. Use "Check Availability" to verify images exist in their registries.</li>
-            </ul>
-
-            <h3>Export</h3>
-            <p>"Export image list" downloads a <code>images.txt</code> file with one image reference per line, ready for use with <code>hangar mirror</code>, <code>hangar save</code>, or other air-gap tooling.</p>
-            <p>Optionally set a <strong>destination registry</strong> in Step 3 to see copy-paste commands for mirroring (<code>hangar mirror -f images.txt -d &lt;registry&gt;</code>), saving/loading a zip bundle, or using <a href="https://github.com/rancher/hauler" target="_blank" rel="noopener noreferrer">Hauler</a> to create a store or mirror.</p>
-
-            <h3>Release Notes</h3>
-            <p>When specific RKE2/K3s versions are selected (not "All"), a "Release Notes &amp; Chart Versions" section appears showing changelog and bundled chart versions from the GitHub release page.</p>
-          </div>
-        </div>
-      </div>
+      <DocsViewer @back="goBackToApp" />
     </template>
 
     <template v-else>
@@ -294,7 +238,7 @@ function backToStep1() {
           <span class="hero-version">v{{ VERSION }}</span>
         </div>
         <div class="hero-actions">
-          <a href="https://github.com/aeltai/hangar-genesis" target="_blank" rel="noopener noreferrer" class="hero-link" title="GitHub Repository">
+          <a href="https://github.com/aeltai/Hangar-Genesis" target="_blank" rel="noopener noreferrer" class="hero-link" title="GitHub Repository">
             <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
             GitHub
           </a>
