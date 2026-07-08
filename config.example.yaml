@@ -1,5 +1,5 @@
-# Example YAML configuration file for hangar genesis
-# Usage: hangar genesis --rancher=v2.13.1 --config=generate-list-config.example.yaml
+# Example YAML configuration for GenesisRK
+# Usage: genesisrk generate --rancher=v2.13.1 --config=config.example.yaml
 #
 # Config mode is non-interactive: no TUI, no prompts (except overwrite if output files exist).
 # Ideal for CI/scripts. Same options as TUI; see README for TUI exit (q / Ctrl+C exits immediately).
