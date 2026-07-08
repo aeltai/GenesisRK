@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { marked } from 'marked'
 import LoadingShapes from './LoadingShapes.vue'
+import ApiSwaggerPanel from './ApiSwaggerPanel.vue'
 
 const props = defineProps<{
   initialDoc?: string
@@ -145,6 +146,7 @@ function onHashChange() {
         <p class="docs-error-detail">{{ error }}</p>
         <p class="docs-error-hint">Run <code>npm run sync-docs</code> and ensure <code>/docs/*.md</code> is served.</p>
       </div>
+      <ApiSwaggerPanel v-if="activeId === 'api'" />
       <article
         v-else
         class="docs-article markdown-body"

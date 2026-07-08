@@ -492,26 +492,6 @@ function toggleReleaseNotes() {
 
 <template>
   <div class="step3">
-    <div v-if="overviewOpen" class="step3-overview">
-      <SelectionOverview
-        compact
-        :rancher-versions="rancherVersions"
-        :distros="distros"
-        :cni="cniForStandard"
-        :k3s-versions="k3sVersions"
-        :rke2-versions="rke2Versions"
-        :available-rancher-versions="availableRancherVersions"
-        :available-k3s-versions="availableK3sVersions"
-        :available-rke2-versions="availableRke2Versions"
-        :include-windows="includeWindows"
-        :load-balancers="loadBalancers ?? []"
-        :chart-count="previewCharts.length"
-        :image-count="previewImages.length"
-      />
-      <button type="button" class="btn-overview-toggle" @click="overviewOpen = false">Hide platform DNA</button>
-    </div>
-    <button v-else type="button" class="btn-overview-toggle btn-overview-show" @click="overviewOpen = true">Show platform DNA</button>
-
     <div class="step3-header">
       <div class="step3-header-left">
         <h2 class="step-title">Step 3: Groups &amp; charts</h2>
@@ -802,6 +782,35 @@ function toggleReleaseNotes() {
         </div>
       </div>
     </div>
+
+    <div class="step3-overview-footer">
+      <button
+        v-if="!overviewOpen"
+        type="button"
+        class="btn-overview-toggle btn-overview-show"
+        @click="overviewOpen = true"
+      >
+        Show platform DNA
+      </button>
+      <div v-else class="step3-overview">
+        <SelectionOverview
+          compact
+          :rancher-versions="rancherVersions"
+          :distros="distros"
+          :cni="cniForStandard"
+          :k3s-versions="k3sVersions"
+          :rke2-versions="rke2Versions"
+          :available-rancher-versions="availableRancherVersions"
+          :available-k3s-versions="availableK3sVersions"
+          :available-rke2-versions="availableRke2Versions"
+          :include-windows="includeWindows"
+          :load-balancers="loadBalancers ?? []"
+          :chart-count="previewCharts.length"
+          :image-count="previewImages.length"
+        />
+        <button type="button" class="btn-overview-toggle" @click="overviewOpen = false">Hide platform DNA</button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -811,6 +820,12 @@ function toggleReleaseNotes() {
   flex-direction: column;
   gap: 0.75rem;
   flex: 1;
+}
+.step3-overview-footer {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .step3-overview {
   display: flex;
@@ -834,7 +849,7 @@ function toggleReleaseNotes() {
   color: var(--accent);
 }
 .btn-overview-show {
-  margin-bottom: 0.25rem;
+  margin-top: 0.25rem;
 }
 .chart-release-link {
   flex-shrink: 0;

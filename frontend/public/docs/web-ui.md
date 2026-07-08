@@ -2,7 +2,8 @@
 
 The GenesisRK web UI is a Vue 3 SPA served by `genesisrk serve --static=frontend/dist`.
 
-**Live demo:** https://genesis-app.bravecoast-8b272aef.westeurope.azurecontainerapps.io/
+**Live demo:** https://genesisrk.mftools.xyz  
+**API explorer:** https://genesisrk.mftools.xyz/api/docs
 
 ## Run locally
 

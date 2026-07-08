@@ -3,6 +3,7 @@ package commands
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -25,6 +26,38 @@ import (
 )
 
 const genesisJobExpiry = 60 * time.Minute
+
+//go:embed genesis_openapi.yaml
+var genesisOpenAPISpec []byte
+
+const genesisSwaggerHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GenesisRK API — Swagger UI</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css" />
+  <style>body { margin: 0; background: #fafafa; }</style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = function () {
+      window.ui = SwaggerUIBundle({
+        url: '/api/openapi.yaml',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+        layout: 'StandaloneLayout',
+        tryItOutEnabled: true,
+        displayRequestDuration: true,
+        filter: true,
+      });
+    };
+  </script>
+</body>
+</html>`
 
 type genesisJob struct {
 	cc                  *genesisCmd
@@ -265,6 +298,8 @@ func newGenesisServeCmd(parent *genesisCmd) {
 			mux.HandleFunc("/api/scan/report/{id}", handleScanReport)
 			mux.HandleFunc("/api/release-notes", handleReleaseNotes)
 			mux.HandleFunc("/api/logs", handleLogs)
+			mux.HandleFunc("/api/openapi.yaml", handleOpenAPISpec)
+			mux.HandleFunc("/api/docs", handleSwaggerUI)
 			if staticDir != "" {
 				fs := http.FileServer(http.Dir(staticDir))
 				mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -363,6 +398,27 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	lines := genesisLogBuf.copy()
 	writeJSON(w, http.StatusOK, map[string]interface{}{"lines": lines})
+}
+
+func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+	w.Header().Set("Cache-Control", "public, max-age=300")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(genesisOpenAPISpec)
+}
+
+func handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(genesisSwaggerHTML))
 }
 
 func handleStep1Options(w http.ResponseWriter, r *http.Request) {

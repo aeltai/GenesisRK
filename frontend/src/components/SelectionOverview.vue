@@ -218,7 +218,7 @@ const stats = computed(() =>
         :height="helixHeight"
       />
 
-      <div class="overview-stats">
+      <div v-if="!compact" class="overview-stats">
         <div v-for="s in stats" :key="s.label" class="stat-chip">
           <span class="stat-chip-label">{{ s.label }}</span>
           <span class="stat-chip-value">{{ s.value }}</span>

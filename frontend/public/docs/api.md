@@ -3,10 +3,17 @@
 Start the server:
 
 ```bash
+# From the Hangar repo (this project)
+hangar genesis serve --port=8080 --static=frontend/dist
+
+# Or from Hangar-Genesis standalone build
 genesisrk serve --port=8080 --static=frontend/dist
 ```
 
-Base URL: `http://localhost:8080`
+**Live server:** https://genesisrk.mftools.xyz  
+**Interactive docs:** [Swagger UI](/api/docs) (embedded below in the Documentation → REST API page)
+
+Base URL: same origin as the web UI (`/`). When developing locally: `http://localhost:8080`
 
 All API routes are under `/api/`. CORS is enabled (`Access-Control-Allow-Origin: *`).
 

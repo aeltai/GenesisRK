@@ -56,6 +56,8 @@ Open http://localhost:8080
 
 ## Terminal demos
 
+These GIFs show the **`genesisrk`** / **`hangar genesis`** CLI. The [live web UI](https://genesisrk.mftools.xyz) runs the same flow via the REST API — use [Swagger UI](/api/docs) to try endpoints on the server directly.
+
 ![Version and help](assets/version.gif)
 
 ![Generate from config](assets/generate.gif)
