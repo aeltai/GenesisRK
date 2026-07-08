@@ -36,6 +36,10 @@ Recorded with [VHS](https://github.com/charmbracelet/vhs) — replay with `vhs d
 
 See also: [generate](assets/generate.gif) · [tui](assets/tui.gif) · [serve](assets/serve.gif)
 
+## In the web UI
+
+Click **Docs** in the header (or open `#docs`) to browse these markdown files in the browser with a sidebar nav. The UI loads the same files from `/docs/*.md` at build time via `npm run sync-docs`.
+
 ## Live demo
 
 https://genesis-app.bravecoast-8b272aef.westeurope.azurecontainerapps.io/

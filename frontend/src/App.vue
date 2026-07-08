@@ -27,14 +27,20 @@ function toggleTheme() {
 
 const step = ref<'step1' | 'loading' | 'step3'>('step1')
 // Hash-based page: '' = app, 'docs' = documentation (separate page)
+function normalizeHash(raw: string): string {
+  return raw.replace(/^\/+/, '')
+}
+
+function isDocsHash(raw: string): boolean {
+  const h = normalizeHash(raw)
+  return h === 'docs' || h.startsWith('docs/')
+}
+
 const page = ref<'app' | 'docs'>(
-  typeof window !== 'undefined' && (window.location.hash.slice(1) === 'docs' || window.location.hash.startsWith('#docs/'))
-    ? 'docs'
-    : 'app'
+  typeof window !== 'undefined' && isDocsHash(window.location.hash.slice(1)) ? 'docs' : 'app'
 )
 function updatePageFromHash() {
-  const h = window.location.hash.slice(1)
-  page.value = h === 'docs' || h.startsWith('docs/') ? 'docs' : 'app'
+  page.value = isDocsHash(window.location.hash.slice(1)) ? 'docs' : 'app'
 }
 function goBackToApp() {
   window.location.hash = ''
@@ -528,76 +534,36 @@ function backToStep1() {
   color: var(--cyan);
 }
 .docs-panel {
-  max-width: 900px;
-  margin: 0 auto;
   padding: 0;
+  overflow: hidden;
   flex: 1;
+  min-height: calc(100vh - 108px - var(--footer-h));
 }
-.docs-body {
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.5rem;
-  font-size: 0.9rem;
-  line-height: 1.6;
-}
-.docs-body h3 {
-  color: var(--green, #22c55e);
-  margin: 1.25rem 0 0.5rem;
-  font-size: 1rem;
-}
-.docs-body h3:first-child {
-  margin-top: 0;
-}
-.docs-body p {
-  margin: 0.5rem 0;
-}
-.docs-body ul {
-  margin: 0.5rem 0;
-  padding-left: 1.25rem;
-}
-.docs-body li {
-  margin: 0.25rem 0;
-}
-.docs-body code {
-  background: var(--bg);
-  padding: 1px 4px;
-  border-radius: 3px;
-  font-size: 0.85em;
-}
-.docs-body a {
-  color: var(--cyan);
-}
-.docs-table {
-  width: 100%;
-  border-collapse: collapse;
-  margin: 0.5rem 0;
-}
-.docs-table td {
-  padding: 0.5rem 0.75rem;
-  border-bottom: 1px solid var(--border);
-  vertical-align: top;
-}
-.docs-table td:first-child {
-  white-space: nowrap;
-  width: 180px;
+.details-section-docs {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
 }
 .main {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 1rem 1.25rem 1.25rem;
+  padding: 0 1.5rem calc(var(--footer-h) + 0.5rem);
   width: 100%;
+  max-width: none;
+  margin: 0;
   min-height: 0;
 }
-.main:has(.panel-fullscreen) {
-  padding: 0.5rem 0.75rem;
+.main:has(.panel-fullscreen),
+.main:has(.docs-panel) {
+  padding-left: 1rem;
+  padding-right: 1rem;
 }
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1.25rem;
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.5rem;
   flex: 1;
   display: flex;
   flex-direction: column;
@@ -607,59 +573,43 @@ function backToStep1() {
   padding: 0;
   overflow: hidden;
 }
-.docs-panel {
-  padding: 0;
-  overflow: hidden;
-  min-height: calc(100vh - 130px);
-}
-.details-section-docs {
-  margin-top: 0.5rem;
-  padding-top: 0.75rem;
-  border-top: 1px dashed var(--border);
-}
 .details-section-docs a {
-  color: var(--cyan);
+  color: var(--accent);
   font-weight: 500;
 }
 .step1-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 320px);
   flex: 1;
-  min-height: calc(100vh - 130px);
+  min-height: calc(100vh - 148px - var(--footer-h));
   align-items: stretch;
 }
 .step1-form {
   min-width: 0;
-  padding: 1.25rem 1.5rem;
+  padding: 1.5rem 1.75rem;
   overflow-y: auto;
 }
 .step1-details {
-  padding: 1.25rem 1.25rem;
-  background: color-mix(in srgb, var(--bg) 50%, var(--panel));
+  padding: 1.25rem 1.5rem;
+  background: color-mix(in srgb, var(--bg) 60%, var(--panel));
   border-left: 1px solid var(--border);
   overflow-y: auto;
 }
 .details-title {
-  font-size: 0.85rem;
-  font-weight: 700;
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--cyan);
-  margin: 0 0 1rem 0;
-  padding-bottom: 0.65rem;
-  border-bottom: 1px solid var(--border);
-}
-.details-section {
-  margin-bottom: 1rem;
+  color: var(--text-muted);
 }
 .details-heading {
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-size: 0.75rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--text);
-  opacity: 0.65;
-  margin: 0 0 0.4rem 0;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem 0;
 }
 .details-links {
   list-style: none;
@@ -756,25 +706,39 @@ function backToStep1() {
   font-size: 0.9rem;
 }
 .footer {
-  margin-top: auto;
-  padding: 1rem 2rem;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0 0.35rem;
+  min-height: var(--footer-h);
+  padding: 0.15rem 1.5rem;
   border-top: 1px solid var(--border);
-  background: var(--panel);
-  font-size: 0.85rem;
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
+  backdrop-filter: blur(8px);
+  font-size: 0.6875rem;
+  line-height: 1.2;
   text-align: center;
-  color: var(--text);
-  opacity: 0.9;
+  color: var(--text-muted);
 }
 .footer a {
-  color: var(--cyan);
+  color: var(--accent);
   text-decoration: none;
+  white-space: nowrap;
 }
 .footer a:hover {
+  color: var(--accent-hover);
   text-decoration: underline;
 }
 .footer-sep {
-  margin: 0 0.5rem;
-  opacity: 0.6;
+  margin: 0 0.15rem;
+  opacity: 0.45;
+  user-select: none;
 }
 
 /* Mobile & tablet */
@@ -817,8 +781,8 @@ function backToStep1() {
     width: 120px;
   }
   .footer {
-    padding: 0.75rem 1rem;
-    font-size: 0.8rem;
+    padding: 0.15rem 0.75rem;
+    font-size: 0.625rem;
   }
   .footer-sep {
     margin: 0 0.35rem;
@@ -890,12 +854,12 @@ function backToStep1() {
     border-bottom: none;
   }
   .footer {
-    padding: 0.5rem 0.75rem;
-    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.625rem;
   }
   .footer a {
-    display: inline-block;
-    margin: 0.1rem 0;
+    display: inline;
+    margin: 0;
   }
   .footer-sep {
     display: inline;

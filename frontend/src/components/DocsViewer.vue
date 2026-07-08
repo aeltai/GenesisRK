@@ -50,8 +50,7 @@ async function loadDoc(id: string) {
     const r = await fetch(`/docs/${page.file}`)
     if (!r.ok) throw new Error(`${r.status} ${r.statusText}`)
     const md = await r.text()
-    const processed = rewriteAssetPaths(md)
-    html.value = marked.parse(processed) as string
+    html.value = marked.parse(rewriteAssetPaths(md)) as string
     activeId.value = id
     if (typeof window !== 'undefined') {
       window.location.hash = id === 'README' ? 'docs' : `docs/${id}`
@@ -79,16 +78,19 @@ function onDocClick(e: MouseEvent) {
   }
 }
 
+function normalizeHash(raw: string): string {
+  return raw.replace(/^\/+/, '')
+}
+
 function parseHash(): string | null {
-  const h = window.location.hash.slice(1)
+  const h = normalizeHash(window.location.hash.slice(1))
   if (h.startsWith('docs/')) return h.slice(5) || 'README'
   if (h === 'docs') return 'README'
   return null
 }
 
 onMounted(() => {
-  const fromHash = parseHash()
-  loadDoc(fromHash ?? props.initialDoc ?? 'README')
+  loadDoc(parseHash() ?? props.initialDoc ?? 'README')
   window.addEventListener('hashchange', onHashChange)
 })
 onUnmounted(() => {
@@ -105,34 +107,44 @@ function onHashChange() {
   <div class="docs-layout">
     <aside class="docs-sidebar">
       <h3 class="sidebar-title">Documentation</h3>
-      <p class="sidebar-desc">Guides for CLI, YAML config, REST API, and deployment.</p>
-      <nav class="docs-nav">
-        <ul class="docs-nav-list">
-          <li v-for="page in DOC_PAGES" :key="page.id">
-            <a
-              :href="page.id === 'README' ? '#docs' : `#docs/${page.id}`"
-              class="docs-nav-link"
-              :class="{ active: activeId === page.id }"
-              @click.prevent="loadDoc(page.id)"
-            >{{ page.label }}</a>
+      <p class="sidebar-desc">CLI, YAML config, REST API, deployment, and air-gap workflows.</p>
+
+      <div class="sidebar-section">
+        <h4 class="sidebar-heading">Guides</h4>
+        <nav>
+          <ul class="sidebar-links">
+            <li v-for="page in DOC_PAGES" :key="page.id">
+              <a
+                :href="page.id === 'README' ? '#docs' : `#docs/${page.id}`"
+                class="sidebar-link"
+                :class="{ active: activeId === page.id }"
+                @click.prevent="loadDoc(page.id)"
+              >{{ page.label }}</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+
+      <div class="sidebar-section sidebar-footer">
+        <h4 class="sidebar-heading">Source</h4>
+        <ul class="sidebar-links">
+          <li>
+            <a href="https://github.com/aeltai/Hangar-Genesis/tree/main/docs" target="_blank" rel="noopener">docs/ on GitHub</a>
           </li>
         </ul>
-      </nav>
-      <p class="sidebar-footer">
-        <a href="https://github.com/aeltai/Hangar-Genesis/tree/main/docs" target="_blank" rel="noopener">View on GitHub</a>
-      </p>
+      </div>
     </aside>
 
-    <div class="docs-content">
-      <div v-if="loading" class="docs-state">Loading…</div>
+    <div class="docs-main">
+      <div v-if="loading" class="docs-state">Loading documentation…</div>
       <div v-else-if="error" class="docs-state docs-error">
-        <p>Could not load documentation.</p>
+        <p class="docs-error-title">Could not load this page</p>
         <p class="docs-error-detail">{{ error }}</p>
-        <p class="docs-error-hint">Ensure <code>/docs/*.md</code> is served from the frontend build.</p>
+        <p class="docs-error-hint">Run <code>npm run sync-docs</code> and ensure <code>/docs/*.md</code> is served.</p>
       </div>
       <article
         v-else
-        class="docs-body markdown-body"
+        class="docs-article markdown-body"
         v-html="html"
         @click="onDocClick"
       />
@@ -143,173 +155,251 @@ function onHashChange() {
 <style scoped>
 .docs-layout {
   display: grid;
-  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr);
-  min-height: calc(100vh - 130px);
+  grid-template-columns: minmax(280px, 320px) minmax(0, 1fr);
+  min-height: calc(100vh - 108px - var(--footer-h));
   align-items: stretch;
 }
+
 .docs-sidebar {
-  padding: 1.25rem 1rem;
-  background: color-mix(in srgb, var(--bg) 50%, var(--panel));
+  padding: 1.25rem 1.5rem;
+  background: color-mix(in srgb, var(--bg) 60%, var(--panel));
   border-right: 1px solid var(--border);
   overflow-y: auto;
 }
+
 .sidebar-title {
-  font-size: 0.85rem;
-  font-weight: 700;
+  margin: 0 0 0.35rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--cyan);
-  margin: 0 0 0.35rem 0;
+  color: var(--text-muted);
 }
+
 .sidebar-desc {
-  margin: 0 0 1rem 0;
-  font-size: 0.78rem;
-  opacity: 0.65;
-  line-height: 1.4;
+  margin: 0 0 1.25rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
-.docs-nav-list {
+
+.sidebar-section {
+  margin-bottom: 1.25rem;
+}
+
+.sidebar-heading {
+  margin: 0 0 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.sidebar-links {
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.docs-nav-list li {
-  margin: 0;
+
+.sidebar-links li {
+  margin: 0 0 0.2rem;
 }
-.docs-nav-link {
+
+.sidebar-link {
   display: block;
-  padding: 0.45rem 0.65rem;
-  margin-bottom: 2px;
-  border-radius: 6px;
-  color: var(--text);
+  padding: 0.35rem 0.5rem;
+  margin-left: -0.5rem;
+  border-radius: var(--radius-md);
+  font-size: 0.8125rem;
+  font-weight: 500;
+  color: color-mix(in srgb, var(--text) 85%, transparent);
   text-decoration: none;
-  font-size: 0.85rem;
   border: 1px solid transparent;
   transition: background 0.15s, border-color 0.15s, color 0.15s;
 }
-.docs-nav-link:hover {
-  background: color-mix(in srgb, var(--cyan) 8%, var(--panel));
-  border-color: color-mix(in srgb, var(--cyan) 30%, var(--border));
-  color: var(--cyan);
+
+.sidebar-link:hover {
+  background: var(--panel-elevated);
+  border-color: var(--border);
+  color: var(--text);
   text-decoration: none;
 }
-.docs-nav-link.active {
-  background: color-mix(in srgb, var(--cyan) 14%, var(--panel));
-  border-color: var(--cyan);
-  color: var(--cyan);
+
+.sidebar-link.active {
+  background: var(--bg);
+  border-color: var(--border-strong);
+  color: var(--text);
   font-weight: 600;
 }
+
 .sidebar-footer {
-  margin: 1.25rem 0 0;
-  padding-top: 0.75rem;
+  margin-top: auto;
+  padding-top: 1rem;
   border-top: 1px solid var(--border);
-  font-size: 0.75rem;
-  opacity: 0.65;
 }
+
 .sidebar-footer a {
-  color: var(--cyan);
+  font-size: 0.8125rem;
+  color: var(--accent);
 }
-.docs-content {
+
+.docs-main {
   min-width: 0;
-  padding: 1.25rem 1.75rem;
+  padding: 1.5rem 2rem;
   overflow-y: auto;
+  background: var(--panel);
 }
+
 .docs-state {
   padding: 2rem 0;
-  opacity: 0.75;
-  font-size: 0.9rem;
+  font-size: 0.875rem;
+  color: var(--text-muted);
 }
-.docs-error {
+
+.docs-error-title {
+  margin: 0 0 0.35rem;
+  font-weight: 600;
   color: var(--red);
 }
+
 .docs-error-detail {
-  font-size: 0.85rem;
-  opacity: 0.9;
+  margin: 0.25rem 0;
+  font-size: 0.8125rem;
 }
+
 .docs-error-hint {
-  font-size: 0.8rem;
-  opacity: 0.7;
-  color: var(--text);
+  margin: 0.75rem 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
 }
+
 .docs-error-hint code {
   background: var(--bg);
   padding: 0.1rem 0.35rem;
-  border-radius: 3px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
 }
 
+/* Markdown — matches generator panel typography */
 .markdown-body :deep(h1) {
-  font-size: 1.5rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   margin: 0 0 1rem;
-  padding-bottom: 0.5rem;
+  padding-bottom: 0.65rem;
   border-bottom: 1px solid var(--border);
   color: var(--text);
 }
+
 .markdown-body :deep(h2) {
-  font-size: 1.2rem;
-  margin: 1.75rem 0 0.75rem;
-  color: var(--cyan);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 1.75rem 0 0.65rem;
+  color: var(--text);
+  letter-spacing: 0.01em;
 }
+
 .markdown-body :deep(h3) {
-  font-size: 1.02rem;
+  font-size: 0.875rem;
+  font-weight: 600;
   margin: 1.25rem 0 0.5rem;
+  color: var(--text);
 }
+
 .markdown-body :deep(p),
 .markdown-body :deep(li) {
-  line-height: 1.65;
-  margin: 0.5rem 0;
-  font-size: 0.9rem;
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  margin: 0.45rem 0;
+  color: color-mix(in srgb, var(--text) 92%, transparent);
 }
+
 .markdown-body :deep(ul),
 .markdown-body :deep(ol) {
-  padding-left: 1.5rem;
+  padding-left: 1.25rem;
+  margin: 0.5rem 0;
 }
+
 .markdown-body :deep(code) {
-  background: color-mix(in srgb, var(--bg) 80%, var(--panel));
-  padding: 0.12em 0.4em;
-  border-radius: 4px;
-  font-size: 0.88em;
+  font-family: var(--font-mono);
+  background: var(--bg);
+  padding: 0.1rem 0.35rem;
+  border-radius: var(--radius-sm);
+  font-size: 0.85em;
+  border: 1px solid var(--border);
 }
+
 .markdown-body :deep(pre) {
   background: var(--bg);
   border: 1px solid var(--border);
-  padding: 1rem;
-  border-radius: 6px;
+  border-radius: var(--radius-md);
+  padding: 0.875rem 1rem;
   overflow-x: auto;
-  font-size: 0.82rem;
+  margin: 0.75rem 0;
 }
+
 .markdown-body :deep(pre code) {
   background: none;
-  padding: 0;
   border: none;
+  padding: 0;
+  font-size: 0.8125rem;
 }
+
 .markdown-body :deep(table) {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.88rem;
-  margin: 1rem 0;
+  font-size: 0.8125rem;
+  margin: 0.75rem 0;
 }
+
 .markdown-body :deep(th),
 .markdown-body :deep(td) {
   border: 1px solid var(--border);
   padding: 0.5rem 0.75rem;
   text-align: left;
+  vertical-align: top;
 }
+
 .markdown-body :deep(th) {
-  background: color-mix(in srgb, var(--bg) 60%, var(--panel));
+  background: var(--panel-elevated);
+  font-weight: 600;
+  color: var(--text);
 }
+
+.markdown-body :deep(tr:nth-child(even) td) {
+  background: color-mix(in srgb, var(--bg) 40%, transparent);
+}
+
 .markdown-body :deep(a) {
-  color: var(--cyan);
+  color: var(--accent);
+  font-weight: 500;
 }
+
+.markdown-body :deep(a:hover) {
+  color: var(--accent-hover);
+}
+
 .markdown-body :deep(img) {
-  max-width: 100%;
-  border-radius: 6px;
+  max-width: min(100%, 960px);
+  border-radius: var(--radius-md);
   margin: 0.75rem 0;
   border: 1px solid var(--border);
 }
+
 .markdown-body :deep(blockquote) {
-  border-left: 3px solid var(--cyan);
-  margin: 1rem 0;
-  padding-left: 1rem;
-  opacity: 0.9;
+  margin: 0.75rem 0;
+  padding: 0.65rem 0 0.65rem 0.875rem;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--bg) 50%, var(--panel));
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: var(--text-muted);
+}
+
+.markdown-body :deep(hr) {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1.5rem 0;
 }
 
 @media (max-width: 900px) {
@@ -317,17 +407,20 @@ function onHashChange() {
     grid-template-columns: 1fr;
     min-height: auto;
   }
+
   .docs-sidebar {
     border-right: none;
     border-bottom: 1px solid var(--border);
   }
-  .docs-nav-list {
+
+  .sidebar-links {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 0.25rem;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.15rem;
   }
-  .docs-content {
-    padding: 1rem;
+
+  .docs-main {
+    padding: 1.25rem 1.5rem;
   }
 }
 </style>

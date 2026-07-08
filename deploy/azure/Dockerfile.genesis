@@ -7,8 +7,8 @@ WORKDIR /src
 RUN git clone --depth 1 --branch v1.9.4 https://github.com/cnrancher/hangar.git /hangar
 
 COPY go.mod go.sum ./
-RUN sed -i 's|=> ../hangar|=> /hangar|' go.mod && go mod download
 COPY . .
+RUN sed -i 's|=> ../hangar|=> /hangar|' go.mod && go mod tidy && go mod download
 ENV CGO_LDFLAGS="-fuse-ld=bfd"
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /genesisrk .
 

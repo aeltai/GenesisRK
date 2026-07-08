@@ -1,33 +1,50 @@
 :root {
-  font-family: 'JetBrains Mono', 'Fira Code', ui-monospace, 'Cascadia Code', monospace;
+  --font-sans: 'Inter', 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  --radius-sm: 3px;
+  --radius-md: 4px;
+  font-family: var(--font-sans);
+  font-size: 14px;
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
-  /* Dark theme (default) */
-  --bg: #0f1419;
-  --panel: #1a2332;
-  --border: #2d3a4f;
-  --text: #e6edf3;
-  --cyan: #58c4dc;
-  --green: #7ee787;
-  --yellow: #e3b341;
-  --red: #f85149;
+  -moz-osx-font-smoothing: grayscale;
+  /* Dark theme (default) — neutral enterprise palette */
+  --bg: #14161a;
+  --panel: #1c1f26;
+  --panel-elevated: #23272f;
+  --border: #2d333d;
+  --border-strong: #3a4150;
+  --text: #e8eaed;
+  --text-muted: #9aa3b2;
+  --accent: #2f6fed;
+  --accent-hover: #2558c7;
+  --cyan: var(--accent);
+  --green: #2a9d6a;
+  --yellow: #c49a2a;
+  --red: #d14343;
   --logo-color: #fff;
+  --footer-h: 1.625rem;
   color-scheme: dark;
 }
 
 [data-theme="light"] {
-  --bg: #eef1f5;
+  --bg: #f4f5f7;
   --panel: #ffffff;
-  --border: #d8dee8;
-  --text: #1f2328;
-  --cyan: #0969da;
-  --green: #1a7f37;
-  --yellow: #9a6700;
-  --red: #cf222e;
-  --logo-color: #1f2328;
+  --panel-elevated: #fafbfc;
+  --border: #d8dde5;
+  --border-strong: #c4cad4;
+  --text: #1a1d24;
+  --text-muted: #5c6573;
+  --accent: #1f5fd6;
+  --accent-hover: #184fb3;
+  --cyan: var(--accent);
+  --green: #1f7a4f;
+  --yellow: #9a7200;
+  --red: #c53030;
+  --logo-color: #1a1d24;
   color-scheme: light;
 }
 
@@ -57,34 +74,47 @@ body {
 }
 
 a {
-  color: var(--cyan);
+  color: var(--accent);
   text-decoration: none;
 }
 a:hover {
+  color: var(--accent-hover);
   text-decoration: underline;
 }
 
 button {
-  border-radius: 6px;
-  border: 1px solid var(--border);
-  padding: 0.5rem 1rem;
-  font-size: 0.95rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-strong);
+  padding: 0.375rem 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 500;
   font-family: inherit;
+  letter-spacing: 0.01em;
   background: var(--panel);
   color: var(--text);
   cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s;
 }
 button:hover {
-  border-color: var(--cyan);
-  background: var(--panel);
+  border-color: var(--border-strong);
+  background: var(--panel-elevated);
 }
 
 [data-theme="light"] button:hover {
-  background: #eaeef2;
+  background: var(--panel-elevated);
 }
 
 input[type="text"],
 input[type="password"],
 select {
   font-family: inherit;
+  font-size: 0.8125rem;
+}
+
+code,
+pre,
+kbd,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.92em;
 }
