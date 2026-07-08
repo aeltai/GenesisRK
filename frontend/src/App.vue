@@ -225,14 +225,14 @@ function backToStep1() {
     <template v-if="page === 'docs'">
       <div class="docs-page">
         <div class="docs-page-header">
-          <a href="#" class="docs-back" @click.prevent="goBackToApp">← Back to Genesis</a>
+          <a href="#" class="docs-back" @click.prevent="goBackToApp">← Back to GenesisRK</a>
           <h1 class="docs-page-title">Documentation</h1>
         </div>
         <div class="docs-panel">
           <div class="docs-body">
             <h3>Overview</h3>
             <p>
-              <strong>Hangar Genesis</strong> generates image lists for Rancher air-gapped deployments.
+              <strong>GenesisRK</strong> generates image lists for Rancher air-gapped deployments.
               It fetches metadata from multiple sources to build a comprehensive, customizable list of
               container images and Helm charts needed for your specific deployment.
             </p>

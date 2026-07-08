@@ -1,18 +1,18 @@
-<!-- Synced from README.md — edit README.md only. -->
+<!-- In-app documentation — full reference: https://github.com/aeltai/Hangar-Genesis/tree/main/docs -->
 
-# Hangar Genesis
+# GenesisRK
 
-**Fork of [Hangar](https://github.com/cnrancher/hangar)** (SUSE Rancher) — this repo adds the Genesis server and web UI on top of upstream Hangar. For syncing with upstream, see [README-PROJECT.md](README-PROJECT.md).
+Standalone product for generating Rancher image lists in air-gapped scenarios. Built on [Hangar](https://github.com/cnrancher/hangar).
 
-**Repo:** [github.com/aeltai/hangar-genesis](https://github.com/aeltai/hangar-genesis) · **Live demo:** [Try Genesis →](https://genesis-app.wonderfulsea-dc99daa3.westeurope.azurecontainerapps.io/)
+**Repo:** [github.com/aeltai/Hangar-Genesis](https://github.com/aeltai/Hangar-Genesis) · **Live demo:** [genesis-app.bravecoast-8b272aef.westeurope.azurecontainerapps.io](https://genesis-app.bravecoast-8b272aef.westeurope.azurecontainerapps.io/)
 
-For **run locally, deploy, and upstream sync**, see [README-PROJECT.md](README-PROJECT.md).
+**Full docs:** [CLI](https://github.com/aeltai/Hangar-Genesis/blob/main/docs/cli.md) · [YAML config](https://github.com/aeltai/Hangar-Genesis/blob/main/docs/config.md) · [REST API](https://github.com/aeltai/Hangar-Genesis/blob/main/docs/api.md) · [Outputs](https://github.com/aeltai/Hangar-Genesis/blob/main/docs/outputs.md)
 
 ---
 
-**Hangar Genesis** is a tool that uses [Hangar](https://github.com/cnrancher/hangar) to generate **modular Rancher / RKE2 / K3s image lists** for air-gapped deployments. You can then **load, save, and transfer** those image lists into air-gapped environments using **[Hauler](https://docs.hauler.dev/docs/intro)** (the "Airgap Swiss Army Knife").
+**GenesisRK** generates **modular Rancher / RKE2 / K3s image lists** for air-gapped deployments. Use [Hangar](https://github.com/cnrancher/hangar) to mirror/save/load, or [Hauler](https://docs.hauler.dev/docs/intro) for store bundles.
 
-This app provides a web UI and an optional CLI; both produce the same image lists and YAML configs.
+Four interfaces — same generator: **declarative YAML**, **imperative CLI flags**, **TUI**, **REST API / this web UI**.
 
 ---
 
@@ -178,7 +178,7 @@ Branch is chosen from the Rancher version you selected: e.g. Rancher `v2.13.1` �
 
 - **Tree:** Expand/collapse components (Rancher, Fleet, K3s/RKE2/RKE, CNI, addon charts, product charts). Select/deselect nodes; selection drives the exported image list.
 - **Export image list:** Download a text file with one image reference per line. Use this with Hangar and Hauler.
-- **Export YAML:** Download a Genesis config file that mirrors your Step 1 + Step 2 selections (distros, CNI, groups, charts, etc.). Use with the CLI: `hangar genesis --rancher=<ver> --config=<file>`.
+- **Export YAML:** Download a Genesis config file that mirrors your Step 1 + Step 2 selections (distros, CNI, groups, charts, etc.). Use with the CLI: `genesisrk --rancher=<ver> --config=<file>`.
 - **Scan:** Run Trivy on the currently selected images; download the vulnerability report when finished.
 
 ---
@@ -192,7 +192,7 @@ You can run Genesis in two ways from the command line: **interactive TUI** (`--t
 The TUI is a terminal UI that mirrors the web flow: Step 1 (distros, versions, CNI, load balancer, Windows), Step 2 (generate tree), Step 3 (select groups/charts/images in the tree, then export).
 
 ```bash
-hangar genesis --rancher=v2.13.1 --tui
+genesisrk --rancher=v2.13.1 --tui
 ```
 
 - **Required:** `--rancher=<version>`. Optional: `--output=images.txt`, `--registry=<dest-registry>`.
@@ -202,19 +202,19 @@ hangar genesis --rancher=v2.13.1 --tui
 ### YAML config (non-interactive)
 
 ```bash
-hangar genesis --rancher=v2.13.1 --config=genesis-config.yaml
+genesisrk --rancher=v2.13.1 --config=genesis-config.yaml
 ```
 
 - **Required:** `--rancher` and `--config`. No prompts (except overwrite).
-- **Where to get YAML:** Export YAML from web UI, TUI with `--save-config`, or copy **`generate-list-config.example.yaml`** from the repo.
+- **Where to get YAML:** Export YAML from web UI, TUI with `--save-config`, or copy **`config.example.yaml`** from the repo.
 
 ### Summary
 
 | Mode        | Command / source                    | Use case                          |
 | ----------- | ----------------------------------- | --------------------------------- |
 | **Web UI**  | Browser + Genesis server            | Visual flow, pipelines (API)      |
-| **TUI**     | `hangar genesis --rancher=X --tui`   | Terminal, one-off or --save-config |
-| **YAML**    | `hangar genesis --rancher=X --config=file.yaml` | CI, scripts, repeat runs  |
+| **TUI**     | `genesisrk --rancher=X --tui`   | Terminal, one-off or --save-config |
+| **YAML**    | `genesisrk --rancher=X --config=file.yaml` | CI, scripts, repeat runs  |
 
 ---
 
@@ -246,7 +246,7 @@ scan:
   timeout: 10m
 ```
 
-Use it: `hangar genesis --rancher=v2.13.1 --config=genesis-config.yaml`. Full example with all options: **`generate-list-config.example.yaml`** in the repo root.
+Use it: `genesisrk --rancher=v2.13.1 --config=genesis-config.yaml`. Full example with all options: **`config.example.yaml`** in the repo root.
 
 ### Fields
 
@@ -264,12 +264,12 @@ Use it: `hangar genesis --rancher=v2.13.1 --config=genesis-config.yaml`. Full ex
 | `selectedProducts`           | `[]string`            | e.g. `["k3k"]`.                                                                        |
 | `scan`                       | `object`              | Optional: `enabled`, `jobs`, `timeout`, `report`.                                      |
 
-See **`generate-list-config.example.yaml`** at the project root for all supported keys (including `rancherVersions`, `includeRC`, `includeGitHubVersions`, `destinationRegistry`, per-LB options).
+See **`config.example.yaml`** at the project root for all supported keys (including `rancherVersions`, `includeRC`, `includeGitHubVersions`, `destinationRegistry`, per-LB options).
 
 ### Running from CLI
 
 ```bash
-hangar genesis --rancher=v2.13.1 --config=genesis-config.yaml
+genesisrk --rancher=v2.13.1 --config=genesis-config.yaml
 # Optional: --output=my-images.txt --rke2-images=...
 ```
 
@@ -280,7 +280,7 @@ hangar genesis --rancher=v2.13.1 --config=genesis-config.yaml
 The **Genesis server** is the HTTP service that serves the API and (optionally) the built web UI. Run it with:
 
 ```bash
-hangar genesis serve [--port=8080] [--static=./frontend/dist]
+genesisrk serve [--port=8080] [--static=./frontend/dist]
 ```
 
 | Flag       | Default   | Description                                                                 |
@@ -455,6 +455,6 @@ See [Hauler documentation](https://docs.hauler.dev/docs/intro).
 
 | Item                | Description                                                                                                                           |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **This app**        | Hangar Genesis: configure distros/versions/options → generate tree → select components → export image list or YAML, optional scan.     |
+| **This app**        | GenesisRK: configure distros/versions/options → generate tree → select components → export image list or YAML, optional scan.     |
 | **Hangar**          | Image lists: copy, save, load, mirror, sign, scan. [Hangar docs](https://hangar.cnrancher.com/docs/).                               |
 | **Hauler**          | Air-gap: store, serve, load. [Hauler releases](https://github.com/hauler-dev/hauler/releases)                                         |
