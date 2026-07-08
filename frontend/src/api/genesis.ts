@@ -44,12 +44,13 @@ export async function fetchStep1Options(
 }
 
 export async function generate(req: GenerateRequest): Promise<GenerateResponse> {
-  const distros = req.distros
+  const distros = req.distros.filter((d) => d !== 'rke')
   const payload: Record<string, unknown> = {
     ...req,
+    distros,
     k3sVersions: distros.includes('k3s') ? req.k3sVersions.join(',') : '',
     rke2Versions: distros.includes('rke2') ? req.rke2Versions.join(',') : '',
-    rkeVersions: distros.includes('rke') ? req.rkeVersions.join(',') : '',
+    rkeVersions: '',
   }
   if (req.rancherVersions?.length) {
     payload.rancherVersions = req.rancherVersions
@@ -89,7 +90,7 @@ export async function fetchStep1OptionsMerged(
     capabilities: {},
     details: first ? first.details : { kdmUrl: '', imageListSource: '' },
   }
-  const distros = ['k3s', 'rke2', 'rke'] as const
+  const distros = ['k3s', 'rke2'] as const
   for (const d of distros) {
     const allVersions = new Set<string>()
     const sources: Record<string, string> = {}
@@ -118,7 +119,7 @@ export async function fetchLogs(): Promise<string[]> {
   return data.lines ?? []
 }
 
-export type AvailabilityResult = Record<string, { status: string; detail: string }>
+export type AvailabilityResult = Record<string, { status: string; detail: string; sizeBytes?: number }>
 
 export async function checkAvailability(images: string[]): Promise<AvailabilityResult> {
   const r = await fetch(`${API_BASE}/check-availability`, {

@@ -2,6 +2,23 @@
 import { ref, reactive, computed, watch, onUnmounted } from 'vue'
 import type { TreeNode } from '../types/genesis'
 import { checkAvailability, fetchReleaseNotes, startScan, getScanStatus, downloadScanReport, fetchLogs, type AvailabilityResult, type ReleaseInfo, type ScanStatusResponse } from '../api/genesis'
+import {
+  chartCategory,
+  chartDisplayName,
+  chartVersion,
+  formatBytes,
+  imageTag,
+  isExpandableNode,
+  KIND_LABELS,
+  nodeTooltip,
+} from '../utils/treeMeta'
+import SelectionOverview from './SelectionOverview.vue'
+import {
+  cniDocs,
+  cniRelease,
+  githubRelease,
+  STACK_COMPONENTS,
+} from '../utils/componentLinks'
 
 const props = defineProps<{
   roots: TreeNode[]
@@ -9,10 +26,16 @@ const props = defineProps<{
   basicImageComponent: Record<string, string>
   pastSelection: string
   components: string
+  distros: string[]
   cniForStandard: string
   rancherVersions: string[]
   rke2Versions: string[]
   k3sVersions: string[]
+  availableRancherVersions?: string[]
+  availableK3sVersions?: string[]
+  availableRke2Versions?: string[]
+  loadBalancers?: string[]
+  includeWindows?: boolean
   destinationRegistry?: string
 }>()
 
@@ -37,8 +60,12 @@ function selectAll(node: TreeNode) {
 function initSelection() {
   if (!props.roots?.length) return
   for (const r of props.roots) {
+    expanded[r.id] = true
     if (r.id === 'basic') {
       selectAll(r)
+      for (const c of r.children || []) {
+        expanded[c.id] = true
+      }
       break
     }
   }
@@ -56,10 +83,7 @@ const visibleRows = computed(() => {
   function walk(nodes: TreeNode[], depth: number) {
     for (const n of nodes) {
       out.push({ depth, node: n })
-      const isExpandable =
-        (n.kind === 'preset' || n.kind === 'component' || n.kind === 'chart_all' || n.kind === 'chart') &&
-        n.children &&
-        n.children.length > 0
+      const isExpandable = isExpandableNode(n)
       if (isExpandable && expanded[n.id]) {
         walk(n.children!, depth + 1)
       }
@@ -88,15 +112,27 @@ function toggleSelect(row: Row) {
   }
 }
 
-// Build chart info: label + parent group for legend tags
-interface ChartInfo { label: string; group: string }
+// Build chart info: label + parent group + version/category for preview column
+interface ChartInfo {
+  label: string
+  group: string
+  version: string
+  category: string
+  description: string
+}
 
 const chartInfoMap = computed(() => {
   const m: Record<string, ChartInfo> = {}
   function walk(nodes: TreeNode[], parentGroup: string) {
     for (const n of nodes) {
       if (n.kind === 'chart') {
-        m[n.id] = { label: n.label, group: parentGroup }
+        m[n.id] = {
+          label: chartDisplayName(n, n.id),
+          group: parentGroup,
+          version: chartVersion(n),
+          category: chartCategory(n),
+          description: n.description || nodeTooltip(n),
+        }
       }
       if (n.children) {
         const g = n.kind === 'component' ? n.label.replace(/\s*\(.*/, '') : parentGroup
@@ -327,6 +363,45 @@ function toggleScanLogs() {
   }
 }
 
+function imageTooltip(img: string): string {
+  const parts: string[] = [img]
+  const tag = imageTag(img)
+  if (tag) parts.push(`Tag: ${tag}`)
+  if (imageChartMap.value[img]) parts.push(`Chart: ${imageChartMap.value[img]}`)
+  if (imageSourceGroup.value[img]) parts.push(`Group: ${imageSourceGroup.value[img]}`)
+  const avail = availResults.value[img]
+  if (avail?.status === 'ok' && avail.sizeBytes) {
+    parts.push(`Pull size (compressed): ${formatBytes(avail.sizeBytes)}`)
+  } else if (avail?.detail) {
+    parts.push(avail.detail)
+  }
+  return parts.join('\n')
+}
+
+const glossaryOpen = ref(false)
+const overviewOpen = ref(true)
+
+/** Known chart name → upstream GitHub repo for release links */
+const CHART_UPSTREAM: Record<string, string> = {
+  'rancher-monitoring': 'rancher/charts',
+  'rancher-logging': 'rancher/charts',
+  'longhorn': 'longhorn/longhorn',
+  'cilium': 'cilium/cilium',
+  'calico': 'projectcalico/calico',
+  'traefik': 'traefik/traefik',
+  'ingress-nginx': 'kubernetes/ingress-nginx',
+  'fleet': 'rancher/fleet',
+  'coredns': 'coredns/coredns',
+}
+
+function chartReleaseUrl(_chartId: string, label: string): string | undefined {
+  const name = label.toLowerCase()
+  for (const [key, repo] of Object.entries(CHART_UPSTREAM)) {
+    if (name.includes(key)) return githubRelease(repo)
+  }
+  return undefined
+}
+
 function chartGroupTag(group: string): string {
   if (!group) return 'A'
   const g = group.toLowerCase()
@@ -417,10 +492,30 @@ function toggleReleaseNotes() {
 
 <template>
   <div class="step3">
+    <div v-if="overviewOpen" class="step3-overview">
+      <SelectionOverview
+        compact
+        :rancher-versions="rancherVersions"
+        :distros="distros"
+        :cni="cniForStandard"
+        :k3s-versions="k3sVersions"
+        :rke2-versions="rke2Versions"
+        :available-rancher-versions="availableRancherVersions"
+        :available-k3s-versions="availableK3sVersions"
+        :available-rke2-versions="availableRke2Versions"
+        :include-windows="includeWindows"
+        :load-balancers="loadBalancers ?? []"
+        :chart-count="previewCharts.length"
+        :image-count="previewImages.length"
+      />
+      <button type="button" class="btn-overview-toggle" @click="overviewOpen = false">Hide platform DNA</button>
+    </div>
+    <button v-else type="button" class="btn-overview-toggle btn-overview-show" @click="overviewOpen = true">Show platform DNA</button>
+
     <div class="step3-header">
       <div class="step3-header-left">
         <h2 class="step-title">Step 3: Groups &amp; charts</h2>
-        <p class="step-desc">Essentials = Rancher core, CNI, distro, LB. AddOns = monitoring, logging, etc. Toggle groups/charts/images.</p>
+        <p class="step-desc">Essentials = Rancher core, CNI, distro, LB. AddOns = monitoring, logging, etc. Hover rows for Rancher context. Check availability for pull sizes.</p>
         <p v-if="pastSelection" class="past-selection">{{ pastSelection }}</p>
       </div>
       <div class="step3-header-actions">
@@ -538,10 +633,12 @@ function toggleReleaseNotes() {
             v-for="row in visibleRows"
             :key="row.node.id"
             class="tree-row"
+            :class="'tree-row-' + row.node.kind"
             :style="{ paddingLeft: row.depth * 12 + 8 + 'px' }"
+            :title="nodeTooltip(row.node)"
           >
             <span
-              v-if="(row.node.kind === 'component' || row.node.kind === 'chart') && row.node.children?.length"
+              v-if="isExpandableNode(row.node)"
               class="expand"
               @click="toggleExpand(row.node.id)"
             >
@@ -554,7 +651,9 @@ function toggleReleaseNotes() {
                 :checked="!!selected[row.node.id]"
                 @change="toggleSelect(row)"
               />
+              <span v-if="KIND_LABELS[row.node.kind]" class="kind-badge">{{ KIND_LABELS[row.node.kind] }}</span>
               <span class="label-text">{{ row.node.label }}</span>
+              <span v-if="row.node.version && row.node.kind === 'chart'" class="version-badge">{{ row.node.version }}</span>
               <span v-if="row.node.count > 0 && row.node.kind !== 'image'" class="count">({{ row.node.count }})</span>
             </label>
           </div>
@@ -570,9 +669,25 @@ function toggleReleaseNotes() {
           <span class="legend-item tag-addons">[A] AddOn</span>
         </div>
         <ul class="preview-list">
-          <li v-for="c in previewCharts.slice(0, 80)" :key="c" class="preview-item">
+          <li
+            v-for="c in previewCharts.slice(0, 80)"
+            :key="c"
+            class="preview-item chart-preview-item"
+            :title="chartInfoMap[c]?.description || ''"
+          >
             <span v-if="chartInfoMap[c]" class="img-tag" :class="chartGroupClass(chartInfoMap[c].group)">[{{ chartGroupTag(chartInfoMap[c].group) }}]</span>
-            {{ chartInfoMap[c]?.label || c }}
+            <span class="chart-name">{{ chartInfoMap[c]?.label || c }}</span>
+            <span v-if="chartInfoMap[c]?.version" class="version-badge">{{ chartInfoMap[c].version }}</span>
+            <span v-if="chartInfoMap[c]?.category" class="category-badge">{{ chartInfoMap[c].category }}</span>
+            <a
+              v-if="chartReleaseUrl(c, chartInfoMap[c]?.label || c)"
+              :href="chartReleaseUrl(c, chartInfoMap[c]?.label || c)"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="chart-release-link"
+              title="Upstream releases"
+              @click.stop
+            >↗</a>
           </li>
           <li v-if="previewCharts.length > 80" class="preview-more">… and {{ previewCharts.length - 80 }} more</li>
         </ul>
@@ -587,16 +702,62 @@ function toggleReleaseNotes() {
           <span class="legend-item tag-addons">[A] AddOn</span>
         </div>
         <ul class="preview-list images">
-          <li v-for="img in previewImages.slice(0, 150)" :key="img" class="preview-item" :title="imageChartMap[img] ? 'Chart: ' + imageChartMap[img] : ''">
-            <span v-if="availChecked && availResults[img]" class="avail-dot" :class="availResults[img]?.status === 'ok' ? 'dot-ok' : 'dot-fail'" :title="availResults[img]?.detail || availResults[img]?.status">{{ availResults[img]?.status === 'ok' ? '\u2713' : '\u2717' }}</span>
+          <li
+            v-for="img in previewImages.slice(0, 150)"
+            :key="img"
+            class="preview-item image-preview-item"
+            :title="imageTooltip(img)"
+          >
+            <span v-if="availChecked && availResults[img]" class="avail-dot" :class="availResults[img]?.status === 'ok' ? 'dot-ok' : 'dot-fail'">{{ availResults[img]?.status === 'ok' ? '\u2713' : '\u2717' }}</span>
             <span v-if="imageSourceGroup[img]" class="img-tag" :class="'tag-' + imageSourceGroup[img].replace(/[^a-zA-Z]/g, '')">[{{ imgTag(imageSourceGroup[img]) }}]</span>
             <span class="img-ref">{{ img }}</span>
+            <span v-if="imageTag(img)" class="tag-badge">{{ imageTag(img) }}</span>
+            <span v-if="availChecked && availResults[img]?.sizeBytes" class="size-badge">{{ formatBytes(availResults[img]!.sizeBytes!) }}</span>
             <span v-if="imageChartMap[img]" class="img-origin">{{ imageChartMap[img] }}</span>
           </li>
           <li v-if="previewImages.length > 150" class="preview-more">… and {{ previewImages.length - 150 }} more</li>
         </ul>
       </div>
     </div>
+    </div>
+
+    <div class="glossary-section">
+      <button type="button" class="btn btn-glossary-toggle" @click="glossaryOpen = !glossaryOpen">
+        {{ glossaryOpen ? '▼' : '▶' }} What is what in Rancher?
+      </button>
+      <div v-if="glossaryOpen" class="glossary-body">
+        <p class="glossary-intro">The tree mirrors how Rancher bundles images: <strong>Essentials</strong> are required for your cluster profile; <strong>AddOns</strong> are optional Helm charts from the Rancher catalog.</p>
+        <dl class="glossary-list">
+          <dt>Essentials / Rancher</dt>
+          <dd>Management server, agent, webhooks, Fleet (GitOps), and system charts Rancher auto-installs.</dd>
+          <dt>CNI</dt>
+          <dd>Pod networking — Calico, Canal, Flannel, or Cilium depending on your Step 1 choice.</dd>
+          <dt>RKE2 / K3s</dt>
+          <dd>Distribution-specific node and system images for the Kubernetes version(s) you selected.</dd>
+          <dt>Load Balancer / Ingress</dt>
+          <dd>Ingress controller images (nginx, Traefik) for exposing workloads outside the cluster.</dd>
+          <dt>Charts vs Images</dt>
+          <dd>A <em>chart</em> is a Helm package; each chart references one or more container <em>images</em> to mirror.</dd>
+          <dt>Version badges</dt>
+          <dd>Inferred from image tags in the chart — use Release Notes below for official Rancher release chart versions.</dd>
+          <dt>Check Availability sizes</dt>
+          <dd>Compressed pull size (linux/amd64 layers) from the container registry — run after selecting images.</dd>
+        </dl>
+        <div class="glossary-links">
+          <h5 class="glossary-links-title">Component release links</h5>
+          <div class="glossary-link-grid">
+            <a v-if="cniForStandard" :href="cniDocs(cniForStandard)" target="_blank" rel="noopener noreferrer">{{ cniForStandard.replace('cni_', '') }} docs ↗</a>
+            <a v-if="cniRelease(cniForStandard)" :href="cniRelease(cniForStandard)" target="_blank" rel="noopener noreferrer">{{ cniForStandard.replace('cni_', '') }} releases ↗</a>
+            <a :href="githubRelease(STACK_COMPONENTS.coredns.repo)" target="_blank" rel="noopener noreferrer">CoreDNS ↗</a>
+            <a :href="githubRelease(STACK_COMPONENTS.fleet.repo)" target="_blank" rel="noopener noreferrer">Fleet ↗</a>
+            <a :href="githubRelease(STACK_COMPONENTS.ingressNginx.repo)" target="_blank" rel="noopener noreferrer">Ingress NGINX ↗</a>
+            <a :href="githubRelease(STACK_COMPONENTS.traefik.repo)" target="_blank" rel="noopener noreferrer">Traefik ↗</a>
+            <a :href="githubRelease('cilium/cilium')" target="_blank" rel="noopener noreferrer">Cilium ↗</a>
+            <a :href="githubRelease('projectcalico/calico')" target="_blank" rel="noopener noreferrer">Calico ↗</a>
+            <a :href="githubRelease('flannel-io/flannel')" target="_blank" rel="noopener noreferrer">Flannel ↗</a>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div v-if="releaseVersions.length > 0" class="release-section">
@@ -651,6 +812,70 @@ function toggleReleaseNotes() {
   gap: 0.75rem;
   flex: 1;
 }
+.step3-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 85%, var(--bg));
+}
+.btn-overview-toggle {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  padding: 0.15rem 0;
+}
+.btn-overview-toggle:hover {
+  color: var(--accent);
+}
+.btn-overview-show {
+  margin-bottom: 0.25rem;
+}
+.chart-release-link {
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  color: var(--accent);
+  text-decoration: none;
+  margin-left: 2px;
+}
+.chart-release-link:hover {
+  text-decoration: underline;
+}
+.glossary-links {
+  margin-top: 0.75rem;
+  padding-top: 0.65rem;
+  border-top: 1px dashed var(--border);
+}
+.glossary-links-title {
+  margin: 0 0 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.glossary-link-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.glossary-link-grid a {
+  font-size: 0.75rem;
+  padding: 0.2rem 0.45rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--accent);
+  text-decoration: none;
+}
+.glossary-link-grid a:hover {
+  border-color: var(--accent);
+}
 .step3-header {
   display: flex;
   align-items: flex-start;
@@ -668,19 +893,23 @@ function toggleReleaseNotes() {
   flex-shrink: 0;
 }
 .step-title {
-  font-size: 1.25rem;
-  color: var(--cyan);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--text);
   margin: 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--border);
 }
 .step-desc {
-  margin: 0;
-  opacity: 0.85;
-  font-size: 0.9rem;
+  margin: 0.5rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.8125rem;
 }
 .past-selection {
   margin: 0;
-  font-size: 0.85rem;
-  color: var(--yellow);
+  font-size: 0.8125rem;
+  color: var(--text-muted);
 }
 .destination-registry-row {
   display: flex;
@@ -715,8 +944,9 @@ function toggleReleaseNotes() {
 }
 .next-steps-title {
   margin: 0 0 0.35rem 0;
-  font-size: 0.95rem;
-  color: var(--green);
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
 }
 .next-steps-desc {
   margin: 0 0 0.5rem 0;
@@ -760,16 +990,20 @@ function toggleReleaseNotes() {
 }
 .col {
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: var(--radius-md);
   padding: 0.75rem;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  background: var(--panel);
 }
 .col-title {
-  font-size: 0.95rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   margin: 0 0 0.5rem 0;
-  color: var(--green);
+  color: var(--text-muted);
 }
 .tree {
   flex: 1;
@@ -786,7 +1020,7 @@ function toggleReleaseNotes() {
 .expand {
   cursor: pointer;
   width: 16px;
-  color: var(--cyan);
+  color: var(--text-muted);
   user-select: none;
 }
 .expand-placeholder {
@@ -808,6 +1042,111 @@ function toggleReleaseNotes() {
 .count {
   opacity: 0.8;
   font-size: 0.85em;
+}
+.kind-badge {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--border) 40%, transparent);
+  color: var(--text-muted);
+}
+.version-badge {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--cyan) 18%, transparent);
+  color: var(--cyan);
+  font-family: ui-monospace, monospace;
+}
+.category-badge {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--yellow) 15%, transparent);
+  color: var(--yellow);
+  text-transform: lowercase;
+}
+.tag-badge {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--green) 12%, transparent);
+  color: var(--green);
+  font-family: ui-monospace, monospace;
+}
+.size-badge {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+  color: var(--text-muted);
+  font-family: ui-monospace, monospace;
+}
+.chart-preview-item {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.chart-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.image-preview-item {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.glossary-section {
+  border-top: 1px solid var(--border);
+  padding-top: 0.5rem;
+}
+.btn-glossary-toggle {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 500;
+  padding: 0.25rem 0;
+}
+.btn-glossary-toggle:hover {
+  color: var(--cyan);
+}
+.glossary-body {
+  margin-top: 0.35rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 85%, var(--bg));
+  font-size: 0.82rem;
+}
+.glossary-intro {
+  margin: 0 0 0.5rem;
+  line-height: 1.45;
+}
+.glossary-list {
+  margin: 0;
+  display: grid;
+  gap: 0.35rem 1rem;
+  grid-template-columns: minmax(120px, 160px) 1fr;
+}
+.glossary-list dt {
+  font-weight: 600;
+  color: var(--cyan);
+  margin: 0;
+}
+.glossary-list dd {
+  margin: 0;
+  opacity: 0.9;
+  line-height: 1.4;
 }
 .legend {
   display: flex;
@@ -852,7 +1191,7 @@ function toggleReleaseNotes() {
   color: var(--yellow);
 }
 .tag-LoadBalancerIngress {
-  color: #a78bfa;
+  color: #6b7280;
 }
 .tag-Ks,
 .tag-RKE,
@@ -888,9 +1227,14 @@ function toggleReleaseNotes() {
   font-size: 0.95rem;
 }
 .btn-primary {
-  background: var(--cyan);
-  color: var(--bg);
-  border-color: var(--cyan);
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+  font-weight: 500;
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
 }
 .btn-secondary {
   background: var(--panel);
@@ -1033,9 +1377,9 @@ function toggleReleaseNotes() {
 .btn-release-toggle {
   background: none;
   border: none;
-  color: var(--cyan);
+  color: var(--accent);
   cursor: pointer;
-  font-size: 0.95rem;
+  font-size: 0.875rem;
   font-weight: 600;
   padding: 0.25rem 0;
 }
@@ -1056,8 +1400,9 @@ function toggleReleaseNotes() {
   margin-bottom: 0.75rem;
 }
 .release-card-title {
-  font-size: 1rem;
-  color: var(--green);
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text);
   margin: 0 0 0.5rem 0;
   display: flex;
   align-items: center;

@@ -1,9 +1,20 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch, onUnmounted } from 'vue'
+import { ref, reactive, onMounted, watch, onUnmounted, computed } from 'vue'
 import { fetchRancherVersions, fetchStep1OptionsMerged, generate, exportImageList, fetchLogs, type RancherVersionInfo } from './api/genesis'
 import type { Step1OptionsResponse, GenerateRequest, GenerateResponse } from './types/genesis'
 import Step1Form from './components/Step1Form.vue'
 import Step3Tree from './components/Step3Tree.vue'
+import SelectionOverview from './components/SelectionOverview.vue'
+import DocsViewer from './components/DocsViewer.vue'
+import LoadingShapes from './components/LoadingShapes.vue'
+import {
+  cniDocs,
+  cniRelease,
+  githubRelease,
+  loadBalancerLinks,
+  rancherRelease,
+  STACK_COMPONENTS,
+} from './utils/componentLinks'
 
 const VERSION = '0.1'
 const theme = ref<'dark' | 'light'>('dark')
@@ -26,11 +37,20 @@ function toggleTheme() {
 
 const step = ref<'step1' | 'loading' | 'step3'>('step1')
 // Hash-based page: '' = app, 'docs' = documentation (separate page)
+function normalizeHash(raw: string): string {
+  return raw.replace(/^\/+/, '')
+}
+
+function isDocsHash(raw: string): boolean {
+  const h = normalizeHash(raw)
+  return h === 'docs' || h.startsWith('docs/')
+}
+
 const page = ref<'app' | 'docs'>(
-  typeof window !== 'undefined' && window.location.hash.slice(1) === 'docs' ? 'docs' : 'app'
+  typeof window !== 'undefined' && isDocsHash(window.location.hash.slice(1)) ? 'docs' : 'app'
 )
 function updatePageFromHash() {
-  page.value = window.location.hash.slice(1) === 'docs' ? 'docs' : 'app'
+  page.value = isDocsHash(window.location.hash.slice(1)) ? 'docs' : 'app'
 }
 function goBackToApp() {
   window.location.hash = ''
@@ -49,8 +69,8 @@ const step1Error = ref('')
 const includeRC = ref(false)
 const includeGitHubVersions = ref(false)
 const genRequest = reactive<GenerateRequest>({
-  rancherVersion: 'v2.13.1',
-  rancherVersions: ['v2.13.1'],
+  rancherVersion: '',
+  rancherVersions: [],
   isRPMGC: false,
   includeAppCollectionCharts: false,
   appCollectionAPIUser: '',
@@ -65,7 +85,6 @@ const genRequest = reactive<GenerateRequest>({
   includeWindows: false,
   k3sVersions: ['all'],
   rke2Versions: ['all'],
-  rkeVersions: ['all'],
   destinationRegistry: '',
 })
 
@@ -109,12 +128,43 @@ watch(serverLogs, () => {
 })
 onUnmounted(stopLogsPoll)
 
+const availableRancherVersionIds = computed(() => rancherVersions.value.map((rv) => rv.version))
+const availableK3sVersionIds = computed(() => step1Options.value?.capabilities?.k3s?.versions ?? [])
+const availableRke2VersionIds = computed(() => step1Options.value?.capabilities?.rke2?.versions ?? [])
+
+const selectedLoadBalancers = computed(() => {
+  const labels: string[] = []
+  if (genRequest.lbK3sKlipper) labels.push('K3s Klipper')
+  if (genRequest.lbK3sTraefik) labels.push('K3s Traefik')
+  if (genRequest.lbRKE2Nginx) labels.push('RKE2 NGINX')
+  if (genRequest.lbRKE2Traefik) labels.push('RKE2 Traefik')
+  return labels
+})
+
+const lbComponentLinks = computed(() =>
+  loadBalancerLinks({
+    lbK3sKlipper: genRequest.lbK3sKlipper,
+    lbK3sTraefik: genRequest.lbK3sTraefik,
+    lbRKE2Nginx: genRequest.lbRKE2Nginx,
+    lbRKE2Traefik: genRequest.lbRKE2Traefik,
+  })
+)
+
 const optionsLoading = ref(false)
 let loadAbort: AbortController | null = null
+
+function applyLatestRancherDefault() {
+  if (genRequest.rancherVersions?.length || genRequest.rancherVersion) return
+  const latest = rancherVersions.value[0]?.version
+  if (!latest) return
+  genRequest.rancherVersion = latest
+  genRequest.rancherVersions = [latest]
+}
 
 async function loadRancherVersions() {
   try {
     rancherVersions.value = await fetchRancherVersions(includeRC.value)
+    applyLatestRancherDefault()
   } catch { /* ignore */ }
 }
 
@@ -123,7 +173,13 @@ async function loadOptions() {
   loadAbort = new AbortController()
   step1Error.value = ''
   optionsLoading.value = true
-  const versions = genRequest.rancherVersions?.length ? genRequest.rancherVersions : [genRequest.rancherVersion]
+  const versions = genRequest.rancherVersions?.length
+    ? genRequest.rancherVersions
+    : (genRequest.rancherVersion ? [genRequest.rancherVersion] : [])
+  if (!versions.length) {
+    optionsLoading.value = false
+    return
+  }
   try {
     step1Options.value = await fetchStep1OptionsMerged(versions, includeRC.value, includeGitHubVersions.value)
   } catch (e) {
@@ -196,93 +252,35 @@ function backToStep1() {
 
 <template>
   <div class="app">
-    <template v-if="page === 'docs'">
-      <div class="docs-page">
-        <div class="docs-page-header">
-          <a href="#" class="docs-back" @click.prevent="goBackToApp">← Back to Genesis</a>
-          <h1 class="docs-page-title">Documentation</h1>
-        </div>
-        <div class="docs-panel">
-          <div class="docs-body">
-            <h3>Overview</h3>
-            <p>
-              <strong>Hangar Genesis</strong> generates image lists for Rancher air-gapped deployments.
-              It fetches metadata from multiple sources to build a comprehensive, customizable list of
-              container images and Helm charts needed for your specific deployment.
-            </p>
-
-            <h3>Step 1: Source &amp; Options</h3>
-            <table class="docs-table">
-              <tr><td><strong>Rancher version</strong></td><td>Select the target Rancher Manager version. Versions are fetched from <a href="https://github.com/rancher/rancher/tags" target="_blank">GitHub tags</a>. Enable "Include pre-release" for RC/alpha/beta versions.</td></tr>
-              <tr><td><strong>Image list source</strong></td><td><em>Community</em> fetches K3s/RKE2 image lists from GitHub releases. <em>Rancher Prime</em> fetches from <code>prime.ribs.rancher.io</code> (curated/certified lists, includes <code>rancher-images.txt</code>). Both use the same KDM and chart repos.</td></tr>
-              <tr><td><strong>Application Collection</strong></td><td>Optionally include charts from <code>dp.apps.rancher.io</code> (Rancher Application Collection marketplace). Requires API credentials.</td></tr>
-              <tr><td><strong>Distros</strong></td><td>Select Kubernetes distributions: <em>K3s</em>, <em>RKE2</em>, and/or <em>RKE1</em> (legacy, Rancher &lt;2.12 only).</td></tr>
-              <tr><td><strong>Kubernetes versions</strong></td><td>
-                Versions from two sources:<br/>
-                &bull; <strong>KDM</strong> (Kontainer Driver Metadata) &mdash; officially supported by this Rancher release, fetched from <code>releases.rancher.com</code><br/>
-                &bull; <strong>GitHub</strong> <span style="opacity:0.7">[GH]</span> &mdash; newer releases from <a href="https://github.com/rancher/rke2/releases" target="_blank">rancher/rke2</a> / <a href="https://github.com/k3s-io/k3s/releases" target="_blank">k3s-io/k3s</a> not yet in KDM<br/>
-                Select "All" for KDM versions, or pick specific versions.
-              </td></tr>
-              <tr><td><strong>Platform</strong></td><td><em>Linux only</em> or <em>Linux + Windows</em> (adds Windows node images for RKE2/K3s).</td></tr>
-              <tr><td><strong>CNI</strong></td><td>Container Network Interface plugin: Canal, Calico, Cilium, Flannel (K3s only), or All.</td></tr>
-              <tr><td><strong>Load Balancer / Ingress</strong></td><td>K3s: Klipper (ServiceLB) and/or Traefik. RKE2: NGINX Ingress and/or Traefik.</td></tr>
-            </table>
-
-            <h3>Step 2: Generate</h3>
-            <p>The backend fetches data from these sources:</p>
-            <ul>
-              <li><strong>KDM</strong> &mdash; <code>releases.rancher.com/kontainer-driver-metadata/</code> for compatible K8s versions and their system images</li>
-              <li><strong>Chart repositories</strong> &mdash; Rancher charts (<code>charts.rancher.io</code> or <code>charts.rancher.com</code>) for Helm chart images</li>
-              <li><strong>GitHub Releases API</strong> &mdash; RKE2/K3s releases for additional version information and release notes</li>
-              <li><strong>Application Collection API</strong> &mdash; <code>api.apps.rancher.io</code> for marketplace charts (if enabled)</li>
-            </ul>
-
-            <h3>Step 3: Groups &amp; Charts</h3>
-            <p>The generated tree has two main groups:</p>
-            <ul>
-              <li><strong>Essentials</strong> &mdash; Core Rancher components, selected distro images, CNI plugin, load balancer/ingress. Pre-selected by default.</li>
-              <li><strong>AddOns</strong> &mdash; Optional charts grouped by category: Monitoring, Logging, Backup, Storage, Security, CIS, Provisioning (cloud operators), Cluster API, OS Management, Support.</li>
-            </ul>
-            <p>Each group shows charts and their container images. You can toggle individual charts or images. The preview panels show:</p>
-            <ul>
-              <li><strong>Charts</strong> &mdash; with legend tags: [R] Rancher, [C] CNI, [RKE2] distro, [LB] ingress, [A] addon</li>
-              <li><strong>Images</strong> &mdash; with group tags and origin chart name. Use "Check Availability" to verify images exist in their registries.</li>
-            </ul>
-
-            <h3>Export</h3>
-            <p>"Export image list" downloads a <code>images.txt</code> file with one image reference per line, ready for use with <code>hangar mirror</code>, <code>hangar save</code>, or other air-gap tooling.</p>
-            <p>Optionally set a <strong>destination registry</strong> in Step 3 to see copy-paste commands for mirroring (<code>hangar mirror -f images.txt -d &lt;registry&gt;</code>), saving/loading a zip bundle, or using <a href="https://github.com/rancher/hauler" target="_blank" rel="noopener noreferrer">Hauler</a> to create a store or mirror.</p>
-
-            <h3>Release Notes</h3>
-            <p>When specific RKE2/K3s versions are selected (not "All"), a "Release Notes &amp; Chart Versions" section appears showing changelog and bundled chart versions from the GitHub release page.</p>
-          </div>
-        </div>
-      </div>
-    </template>
-
-    <template v-else>
     <header class="hero">
       <div class="hero-inner">
-        <div class="hero-brand">
-          <h1 class="hero-title">Genesis</h1>
+        <a href="#" class="hero-brand" @click.prevent="goBackToApp">
+          <h1 class="hero-title">GenesisRK</h1>
           <span class="hero-version">v{{ VERSION }}</span>
-        </div>
+        </a>
         <div class="hero-actions">
           <a href="https://github.com/aeltai/hangar-genesis" target="_blank" rel="noopener noreferrer" class="hero-link" title="GitHub Repository">
-            <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
             GitHub
           </a>
-          <a href="#docs" class="hero-link" title="Documentation">Docs</a>
+          <a href="#" class="hero-link" :class="{ active: page === 'app' }" title="Image list generator" @click.prevent="goBackToApp">Generator</a>
+          <a href="#docs" class="hero-link" :class="{ active: page === 'docs' }" title="Documentation">Docs</a>
           <button type="button" class="theme-toggle" :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'" @click="toggleTheme">
             {{ theme === 'dark' ? 'Light' : 'Dark' }}
           </button>
         </div>
       </div>
-      <p class="hero-subtitle">
-        Build image lists for air-gapped Rancher: choose Rancher version(s), distros (K3s, RKE2, RKE1), CNI, load balancer, and charts—then export one list to mirror or save.
-      </p>
     </header>
+
     <main class="main">
+      <div v-if="page === 'docs'" class="panel docs-panel">
+        <DocsViewer />
+      </div>
+
+      <template v-else>
+      <p v-if="step !== 'step3'" class="app-intro">
+        Build image lists for air-gapped Rancher: choose Rancher version(s), distros (K3s, RKE2), CNI, load balancer, and charts—then export one list to mirror or save.
+      </p>
       <div v-if="step === 'step1'" class="panel step1-panel">
         <div class="step1-layout">
           <div class="step1-form">
@@ -305,7 +303,6 @@ function backToStep1() {
               v-model:include-windows="genRequest.includeWindows"
               v-model:k3s-versions="genRequest.k3sVersions"
               v-model:rke2-versions="genRequest.rke2Versions"
-              v-model:rke-versions="genRequest.rkeVersions"
               :options="step1Options"
               :load-error="step1Error"
               :options-loading="optionsLoading"
@@ -314,14 +311,51 @@ function backToStep1() {
             <p v-if="genError" class="error">{{ genError }}</p>
           </div>
           <aside v-if="(genRequest.rancherVersions?.length || genRequest.rancherVersion) && step1Options" class="step1-details">
-            <h3 class="details-title">Details for this configuration</h3>
-            <div class="details-section">
+            <SelectionOverview
+              :rancher-versions="genRequest.rancherVersions?.length ? genRequest.rancherVersions : (genRequest.rancherVersion ? [genRequest.rancherVersion] : [])"
+              :distros="genRequest.distros"
+              :cni="genRequest.cni"
+              :k3s-versions="genRequest.distros.includes('k3s') ? genRequest.k3sVersions : []"
+              :rke2-versions="genRequest.distros.includes('rke2') ? genRequest.rke2Versions : []"
+              :available-rancher-versions="availableRancherVersionIds"
+              :available-k3s-versions="availableK3sVersionIds"
+              :available-rke2-versions="availableRke2VersionIds"
+              :include-windows="genRequest.includeWindows"
+              :load-balancers="selectedLoadBalancers"
+            />
+            <div class="details-section details-section-spaced">
               <h4 class="details-heading">Rancher</h4>
               <ul class="details-links">
                 <li v-for="v in (genRequest.rancherVersions?.length ? genRequest.rancherVersions : [genRequest.rancherVersion])" :key="v">
-                  <a :href="'https://github.com/rancher/rancher/releases/tag/' + v" target="_blank" rel="noopener noreferrer">Release {{ v }}</a>
+                  <a :href="rancherRelease(v)" target="_blank" rel="noopener noreferrer">Release {{ v }}</a>
                 </li>
                 <li><a href="https://ranchermanager.docs.rancher.com/releases" target="_blank" rel="noopener noreferrer">Rancher release notes</a></li>
+              </ul>
+            </div>
+            <div v-if="genRequest.cni" class="details-section">
+              <h4 class="details-heading">CNI — {{ genRequest.cni.replace('cni_', '').replace('_', ' ') }}</h4>
+              <ul class="details-links">
+                <li><a :href="cniDocs(genRequest.cni)" target="_blank" rel="noopener noreferrer">Documentation</a></li>
+                <li v-if="cniRelease(genRequest.cni)"><a :href="cniRelease(genRequest.cni)" target="_blank" rel="noopener noreferrer">Upstream releases</a></li>
+              </ul>
+            </div>
+            <div class="details-section">
+              <h4 class="details-heading">Cluster components</h4>
+              <ul class="details-links">
+                <li><a :href="githubRelease(STACK_COMPONENTS.coredns.repo)" target="_blank" rel="noopener noreferrer">CoreDNS releases</a></li>
+                <li><a :href="STACK_COMPONENTS.coredns.docs" target="_blank" rel="noopener noreferrer">CoreDNS docs</a></li>
+                <li><a :href="githubRelease(STACK_COMPONENTS.fleet.repo)" target="_blank" rel="noopener noreferrer">Fleet releases</a></li>
+                <li><a :href="STACK_COMPONENTS.fleet.docs" target="_blank" rel="noopener noreferrer">Fleet docs</a></li>
+                <li><a :href="githubRelease(STACK_COMPONENTS.metricsServer.repo)" target="_blank" rel="noopener noreferrer">Metrics Server releases</a></li>
+              </ul>
+            </div>
+            <div v-if="lbComponentLinks.length" class="details-section">
+              <h4 class="details-heading">Ingress / Load balancer</h4>
+              <ul class="details-links">
+                <li v-for="lb in lbComponentLinks" :key="lb.label">
+                  <a :href="lb.href" target="_blank" rel="noopener noreferrer">{{ lb.label }}</a>
+                  <span v-if="lb.hint" class="details-hint"> — {{ lb.hint }}</span>
+                </li>
               </ul>
             </div>
             <div class="details-section">
@@ -350,7 +384,15 @@ function backToStep1() {
               <ul class="details-links">
                 <li v-if="genRequest.distros.includes('k3s')"><a href="https://docs.k3s.io/" target="_blank" rel="noopener noreferrer">K3s</a></li>
                 <li v-if="genRequest.distros.includes('rke2')"><a href="https://docs.rke2.io/" target="_blank" rel="noopener noreferrer">RKE2</a></li>
-                <li v-if="genRequest.distros.includes('rke')"><a href="https://rke.docs.rancher.com/" target="_blank" rel="noopener noreferrer">RKE1</a></li>
+              </ul>
+            </div>
+            <div class="details-section details-section-docs">
+              <h4 class="details-heading">GenesisRK docs</h4>
+              <ul class="details-links">
+                <li><a href="#docs">Overview</a></li>
+                <li><a href="#docs/getting-started">Getting started</a></li>
+                <li><a href="#docs/cli">CLI reference</a></li>
+                <li><a href="#docs/api">REST API</a></li>
               </ul>
             </div>
           </aside>
@@ -358,7 +400,7 @@ function backToStep1() {
       </div>
 
       <div v-else-if="step === 'loading'" class="panel loading-panel">
-        <p class="loading-text">Generating tree from KDM and charts…</p>
+        <LoadingShapes size="lg" label="Generating tree from KDM and charts…" />
         <p class="loading-hint">This may take a minute.</p>
         <div class="loading-logs">
           <button type="button" class="logs-toggle" @click="showLogs = !showLogs">
@@ -377,16 +419,23 @@ function backToStep1() {
           :basic-image-component="genResponse.basicImageComponent"
           :past-selection="genResponse.pastSelection"
           :components="genRequest.distros.join(',')"
+          :distros="genRequest.distros"
           :cni-for-standard="genRequest.cni"
           :rancher-versions="genRequest.rancherVersions?.length ? genRequest.rancherVersions : (genRequest.rancherVersion ? [genRequest.rancherVersion] : [])"
           :rke2-versions="genRequest.distros.includes('rke2') ? genRequest.rke2Versions : []"
           :k3s-versions="genRequest.distros.includes('k3s') ? genRequest.k3sVersions : []"
+          :available-rancher-versions="availableRancherVersionIds"
+          :available-k3s-versions="availableK3sVersionIds"
+          :available-rke2-versions="availableRke2VersionIds"
+          :load-balancers="selectedLoadBalancers"
+          :include-windows="genRequest.includeWindows"
           v-model:destination-registry="genRequest.destinationRegistry"
           @export-list="runExport"
           @back="backToStep1"
         />
         <p v-if="exportError" class="error">{{ exportError }}</p>
       </div>
+      </template>
     </main>
 
     <footer class="footer">
@@ -400,7 +449,6 @@ function backToStep1() {
       <span class="footer-sep">·</span>
       <a href="https://github.com/aeltai" target="_blank" rel="noopener noreferrer">@aeltai</a>
     </footer>
-    </template>
   </div>
 </template>
 
@@ -413,135 +461,126 @@ function backToStep1() {
   color: var(--text);
 }
 .hero {
-  padding: 1.25rem 2rem 1.5rem;
+  padding: 0.5rem 1.5rem;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(135deg, var(--panel) 0%, color-mix(in srgb, var(--panel) 95%, var(--border)) 100%);
-  position: relative;
-}
-.hero::before {
-  content: '';
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 4px;
-  background: linear-gradient(180deg, var(--cyan), var(--green));
-  border-radius: 0 2px 2px 0;
+  background: var(--panel);
 }
 .hero-inner {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.75rem;
+  gap: 1rem;
+  flex-wrap: nowrap;
+  min-height: 2.25rem;
 }
 .hero-brand {
   display: flex;
   align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  text-decoration: none;
+  color: inherit;
+}
+.hero-brand:hover .hero-title {
+  color: var(--accent);
 }
 .hero-title {
-  font-size: 2rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: var(--cyan);
+  transition: color 0.15s;
+  font-size: 1.0625rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
   margin: 0;
-  text-shadow: 0 0 20px color-mix(in srgb, var(--cyan) 30%, transparent);
+  line-height: 1.2;
 }
 .hero-version {
-  font-size: 0.8rem;
-  font-weight: 600;
-  opacity: 0.85;
+  font-size: 0.6875rem;
+  font-weight: 500;
+  opacity: 0.65;
   color: var(--text);
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--border) 40%, transparent);
+  padding: 0.1rem 0.35rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  line-height: 1.3;
 }
 .hero-actions {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 .hero-link {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 0.4rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 80%, var(--border));
-  border: 1px solid var(--border);
-  color: var(--text);
+  gap: 4px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--text) 75%, transparent);
   text-decoration: none;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .hero-link:hover {
-  border-color: var(--cyan);
-  color: var(--cyan);
+  border-color: var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+.hero-link.active {
+  border-color: var(--border-strong);
+  background: var(--bg);
+  color: var(--text);
 }
 .theme-toggle {
-  padding: 0.4rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 80%, var(--border));
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border-radius: 4px;
+  background: transparent;
   border: 1px solid var(--border);
-  color: var(--text);
+  color: color-mix(in srgb, var(--text) 75%, transparent);
   cursor: pointer;
-  transition: border-color 0.2s;
+  transition: border-color 0.15s, color 0.15s, background 0.15s;
 }
 .theme-toggle:hover {
-  border-color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 50%, var(--border));
+  color: var(--text);
+  background: var(--bg);
 }
-.docs-page {
-  min-height: 100vh;
-  display: flex;
-  flex-direction: column;
-  padding: 0 2rem 2rem;
-}
-.docs-page-header {
-  padding: 1.5rem 0 1rem;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 1.5rem;
-}
-.docs-back {
-  display: inline-block;
-  font-size: 0.9rem;
-  color: var(--cyan);
-  text-decoration: none;
-  margin-bottom: 0.75rem;
-}
-.docs-back:hover {
-  text-decoration: underline;
+.docs-main {
+  padding-top: 1.25rem;
 }
 .docs-page-title {
-  margin: 0;
-  font-size: 1.75rem;
-  font-weight: 700;
-  color: var(--cyan);
+  margin: 0 0 1rem;
+  font-size: 1.125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
 }
 .docs-panel {
   max-width: 900px;
-  margin: 0 auto;
+  margin: 0;
   padding: 0;
   flex: 1;
 }
 .docs-body {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.5rem;
-  font-size: 0.9rem;
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.5rem;
+  font-size: 0.875rem;
   line-height: 1.6;
 }
 .docs-body h3 {
-  color: var(--green, #22c55e);
+  color: var(--text);
   margin: 1.25rem 0 0.5rem;
-  font-size: 1rem;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
 }
 .docs-body h3:first-child {
   margin-top: 0;
@@ -579,67 +618,108 @@ function backToStep1() {
   white-space: nowrap;
   width: 180px;
 }
-.hero-subtitle {
-  margin: 0;
-  opacity: 0.88;
-  font-size: 0.9rem;
-  letter-spacing: 0.01em;
-  max-width: 56rem;
+.app-intro {
+  padding: 0.625rem 0 0.875rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 .main {
   flex: 1;
-  padding: 1.5rem 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 0 1.5rem calc(var(--footer-h) + 0.5rem);
   width: 100%;
+  max-width: none;
+  margin: 0;
 }
-.main:has(.panel-fullscreen) {
-  max-width: 100%;
-  padding: 0.5rem 1rem;
+.main:has(.panel-fullscreen),
+.main:has(.docs-panel) {
+  padding-left: 1rem;
+  padding-right: 1rem;
 }
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  padding: 1.25rem 1.5rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .step1-panel {
   padding: 0;
+  overflow: hidden;
+  width: 100%;
+  align-self: stretch;
+}
+.docs-panel {
+  padding: 0;
+  overflow: hidden;
+  flex: 1;
+  min-height: calc(100vh - 108px - var(--footer-h));
+}
+.details-section-docs {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+}
+.details-section-docs a {
+  color: var(--accent);
+  font-weight: 500;
 }
 .step1-layout {
   display: grid;
-  grid-template-columns: 1fr minmax(280px, 340px);
-  gap: 1.5rem;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  min-height: calc(100vh - 148px - var(--footer-h));
+  align-items: stretch;
+  width: 100%;
+}
+.step1-layout:not(:has(.step1-details)) {
+  grid-template-columns: 1fr;
 }
 .step1-form {
   min-width: 0;
-  padding: 1.5rem;
+  padding: 1.5rem 1.75rem;
+  overflow-y: auto;
 }
 .step1-details {
   padding: 1.25rem 1.5rem;
   background: color-mix(in srgb, var(--bg) 60%, var(--panel));
   border-left: 1px solid var(--border);
-  border-radius: 0 8px 8px 0;
-  position: sticky;
-  top: 1rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.details-section-spaced {
+  margin-top: 0.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.details-hint {
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 .details-title {
-  font-size: 1rem;
-  color: var(--cyan);
-  margin: 0 0 1rem 0;
+  margin: 0 0 0.75rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.details-heading {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem 0;
 }
 .details-section {
   margin-bottom: 1.25rem;
-}
-.details-heading {
-  font-size: 0.8rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: var(--text);
-  opacity: 0.9;
-  margin: 0 0 0.5rem 0;
 }
 .details-links {
   list-style: none;
@@ -675,12 +755,11 @@ function backToStep1() {
 @media (max-width: 900px) {
   .step1-layout {
     grid-template-columns: 1fr;
+    min-height: auto;
   }
   .step1-details {
-    position: static;
     border-left: none;
     border-top: 1px solid var(--border);
-    border-radius: 0 0 8px 8px;
   }
 }
 .panel-fullscreen {
@@ -691,14 +770,15 @@ function backToStep1() {
 .loading-panel {
   text-align: center;
   padding: 3rem;
-}
-.loading-text {
-  font-size: 1.1rem;
-  margin-bottom: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.35rem;
 }
 .loading-hint {
   opacity: 0.7;
   font-size: 0.9rem;
+  margin: 0;
 }
 .loading-logs {
   margin-top: 1.5rem;
@@ -732,41 +812,55 @@ function backToStep1() {
   font-size: 0.9rem;
 }
 .footer {
-  margin-top: auto;
-  padding: 1rem 2rem;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 0 0.35rem;
+  min-height: var(--footer-h);
+  padding: 0.15rem 1.5rem;
   border-top: 1px solid var(--border);
-  background: var(--panel);
-  font-size: 0.85rem;
+  background: color-mix(in srgb, var(--panel) 94%, var(--bg));
+  backdrop-filter: blur(8px);
+  font-size: 0.6875rem;
+  line-height: 1.2;
   text-align: center;
-  color: var(--text);
-  opacity: 0.9;
+  color: var(--text-muted);
 }
 .footer a {
-  color: var(--cyan);
+  color: var(--accent);
   text-decoration: none;
+  white-space: nowrap;
 }
 .footer a:hover {
+  color: var(--accent-hover);
   text-decoration: underline;
 }
 .footer-sep {
-  margin: 0 0.5rem;
-  opacity: 0.6;
+  margin: 0 0.15rem;
+  opacity: 0.45;
+  user-select: none;
 }
 
 /* Mobile & tablet */
 @media (max-width: 768px) {
   .hero {
-    padding: 1rem 1rem 1.25rem;
+    padding: 0.45rem 1rem;
   }
   .hero-title {
-    font-size: 1.5rem;
+    font-size: 1rem;
   }
   .hero-actions {
-    width: 100%;
-    justify-content: flex-start;
+    margin-left: auto;
   }
-  .hero-subtitle {
-    font-size: 0.85rem;
+  .app-intro {
+    padding: 0.5rem 1rem 0;
+    font-size: 0.75rem;
   }
   .main {
     padding: 1rem;
@@ -783,8 +877,8 @@ function backToStep1() {
   .step1-details {
     padding: 1rem 1.25rem;
   }
-  .docs-page {
-    padding: 0 1rem 1.5rem;
+  .docs-main {
+    padding-top: 1rem;
   }
   .docs-body {
     padding: 1rem;
@@ -793,8 +887,8 @@ function backToStep1() {
     width: 120px;
   }
   .footer {
-    padding: 0.75rem 1rem;
-    font-size: 0.8rem;
+    padding: 0.15rem 0.75rem;
+    font-size: 0.625rem;
   }
   .footer-sep {
     margin: 0 0.35rem;
@@ -809,27 +903,25 @@ function backToStep1() {
 
 @media (max-width: 480px) {
   .hero {
-    padding: 0.75rem 0.75rem 1rem;
+    padding: 0.4rem 0.75rem;
   }
   .hero-inner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
+    gap: 0.4rem;
   }
   .hero-title {
-    font-size: 1.35rem;
+    font-size: 0.9375rem;
   }
   .hero-actions {
-    flex-wrap: wrap;
-    gap: 0.4rem;
+    gap: 0.25rem;
   }
   .hero-link,
   .theme-toggle {
-    padding: 0.35rem 0.6rem;
-    font-size: 0.8rem;
+    padding: 0.2rem 0.4rem;
+    font-size: 0.6875rem;
   }
-  .hero-subtitle {
-    font-size: 0.8rem;
+  .app-intro {
+    padding: 0.4rem 0.75rem 0;
+    font-size: 0.6875rem;
   }
   .main {
     padding: 0.75rem;
@@ -847,11 +939,11 @@ function backToStep1() {
   .step1-details {
     padding: 0.75rem 1rem;
   }
-  .docs-page {
-    padding: 0 0.75rem 1rem;
+  .docs-main {
+    padding-top: 0.75rem;
   }
   .docs-page-title {
-    font-size: 1.4rem;
+    font-size: 1rem;
   }
   .docs-body {
     padding: 0.75rem;
@@ -879,21 +971,18 @@ function backToStep1() {
     border-bottom: none;
   }
   .footer {
-    padding: 0.5rem 0.75rem;
-    font-size: 0.75rem;
+    padding: 0.15rem 0.5rem;
+    font-size: 0.625rem;
   }
   .footer a {
-    display: inline-block;
-    margin: 0.1rem 0;
+    display: inline;
+    margin: 0;
   }
   .footer-sep {
     display: inline;
   }
   .loading-panel {
     padding: 1.5rem 0.75rem;
-  }
-  .loading-text {
-    font-size: 1rem;
   }
   .logs-content {
     max-height: 180px;

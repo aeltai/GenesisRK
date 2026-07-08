@@ -1353,6 +1353,52 @@ func inferChartVersion(imgs []string) string {
 	return best
 }
 
+// basicComponentDescriptions explains Essentials subgroups in the Step 3 tree.
+var basicComponentDescriptions = map[string]string{
+	"Rancher":                  "Core Rancher server, agent, webhooks, Fleet GitOps, and auto-deployed system charts.",
+	"CNI":                      "Container network interface (Calico, Canal, Flannel, etc.) — pod networking for your cluster.",
+	"K3s":                      "Lightweight Kubernetes distribution images bundled with your selected K3s version(s).",
+	"RKE2":                     "RKE2 (Rancher Kubernetes Engine 2) node and system images for your selected version(s).",
+	"RKE1":                     "Legacy RKE1 cluster provisioning images (when RKE1 is selected).",
+	"Load Balancer / Ingress":  "Ingress controller or load-balancer images (nginx, Traefik, Klipper) for exposing services.",
+}
+
+// chartCategoryDescriptions explains AddOn chart categories.
+var chartCategoryDescriptions = map[string]string{
+	"monitoring":     "Prometheus, Grafana, Alertmanager — cluster observability and metrics.",
+	"logging":        "Fluent Bit / Fluentd log collectors and forwarding.",
+	"backup-restore": "Velero and backup-restore operators for cluster disaster recovery.",
+	"storage":        "Longhorn, Harvester, CSI drivers, and persistent storage operators.",
+	"security":       "NeuVector, Gatekeeper, and runtime security tooling.",
+	"cis":            "CIS benchmark scanning and compliance reporting.",
+	"provisioning":   "Cloud provider operators for EKS, GKE, AKS, vSphere, and CAPI.",
+	"networking":     "Service mesh (Istio), SR-IOV, and advanced networking add-ons.",
+	"cluster-api":    "Cluster API providers and Rancher Turtles extensions.",
+	"os-management":  "Elemental and edge/OS lifecycle management.",
+	"support":        "Supportability and diagnostic tools.",
+	"other":          "Additional marketplace charts not in a named category.",
+	"fleet":          "Fleet GitOps — deploy applications and multi-cluster workloads from Git.",
+	"system":         "Charts auto-deployed by Rancher (webhook, provisioning-capi, system-upgrade).",
+}
+
+func refsToTreeNodes(refs []string) []treeNode {
+	nodes := make([]treeNode, 0, len(refs))
+	for _, ref := range refs {
+		nodes = append(nodes, treeNode{
+			Id: ref, Label: ref, Kind: "image", Count: 0,
+			Version: imageTagFromRef(ref),
+		})
+	}
+	return nodes
+}
+
+func imageTagFromRef(ref string) string {
+	if i := strings.LastIndex(ref, ":"); i > 0 {
+		return ref[i+1:]
+	}
+	return ""
+}
+
 // buildGenesisTree builds the tree for Step 3 (TUI or API). Returns roots, basicCharts, fleetCharts, cniCharts, basicImageComponent, pastSelection.
 func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNode, fleetCharts []treeNode, cniCharts []treeNode, basicImageComponent map[string]string, pastSelection string) {
 	sourceGroups := listgenerator.GroupImagesBySource(
@@ -1710,6 +1756,7 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			chartChildren = append(chartChildren, treeNode{
 				Id: "basic_chart_" + ch, Label: chartLabel,
 				Kind: "chart", Count: len(cImgs),
+				Version: ver,
 				Children: refsToTreeNodes(cImgs),
 			})
 		}
@@ -1717,6 +1764,7 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 		return treeNode{
 			Id: id, Label: label + " (" + strconv.Itoa(len(imgs)) + " images, " + strconv.Itoa(len(chartChildren)) + " charts)",
 			Kind: "component", Count: len(imgs),
+			Description: basicComponentDescriptions[label],
 			Children: chartChildren,
 		}
 	}
@@ -1793,7 +1841,10 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			}
 			chartNode := treeNode{
 				Id: name, Label: name + verLabel + cat,
-				Kind: "chart", Count: cg.Count(), Children: refsToTreeNodes(imgs),
+				Kind: "chart", Count: cg.Count(),
+				Version: ver, Category: cg.Category,
+				Description: cg.Description,
+				Children: refsToTreeNodes(imgs),
 			}
 
 			// Categorize: Basic charts = ONLY auto-deployed Rancher system charts
@@ -1804,6 +1855,12 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 				name == "remotedialer-proxy" ||
 				name == "ui-plugin-operator" || name == "ui-plugin-operator-crd"
 			if isBasic {
+				if chartNode.Category == "" {
+					chartNode.Category = "system"
+				}
+				if chartNode.Description == "" {
+					chartNode.Description = chartCategoryDescriptions["system"]
+				}
 				basicChartNodes = append(basicChartNodes, chartNode)
 			} else {
 				// Addon chart: group by category
@@ -1859,6 +1916,10 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 				if !knownCats[category] {
 					category = "other"
 				}
+				chartNode.Category = category
+				if chartNode.Description == "" {
+					chartNode.Description = chartCategoryDescriptions[category]
+				}
 				addonChartsByCategory[category] = append(addonChartsByCategory[category], chartNode)
 			}
 		}
@@ -1888,7 +1949,9 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 				}
 				addonSubgroups = append(addonSubgroups, treeNode{
 					Id: "addon_" + cat, Label: categoryNames[cat],
-					Kind: "component", Count: totalImgs, Children: charts,
+					Kind: "component", Count: totalImgs,
+					Description: chartCategoryDescriptions[cat],
+					Children: charts,
 				})
 			}
 		}
@@ -1948,7 +2011,9 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			}
 			roots = append(roots, treeNode{
 				Id: "addons", Label: "AddOns",
-				Kind: "component", Count: totalAddonImgs, Children: addonSubgroups,
+				Kind: "component", Count: totalAddonImgs,
+				Description: "Optional Rancher marketplace charts — monitoring, logging, backup, storage, security, and more.",
+				Children: addonSubgroups,
 			})
 		}
 	}
@@ -1957,6 +2022,7 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 	roots = append([]treeNode{{
 		Id: "basic", Label: "Essentials",
 		Kind: "component", Count: len(basicImgs),
+		Description: "Required images for Rancher, your Kubernetes distro, selected CNI, and ingress/load balancer.",
 		Children: basicChildren,
 	}}, roots...)
 
@@ -2341,14 +2407,6 @@ func filterImagesByVersions(images []string, k3sVers, rke2Vers, rkeVers string) 
 		}
 	}
 	return filtered
-}
-
-func refsToTreeNodes(refs []string) []treeNode {
-	nodes := make([]treeNode, 0, len(refs))
-	for _, ref := range refs {
-		nodes = append(nodes, treeNode{Id: ref, Label: ref, Kind: "image", Count: 0})
-	}
-	return nodes
 }
 
 func (cc *genesisCmd) parseComponentFlags() error {

@@ -45,6 +45,16 @@ Uses `az containerapp up`: creates the Container Apps environment (and Log Analy
 
 4. **Open the app:** The script prints the FQDN (e.g. `https://genesis-app.<hash>.<region>.azurecontainerapps.io`).
 
+**Custom domain** (e.g. `genesisrk.mftools.xyz`):
+
+```bash
+./custom-domain.sh dns     # print DNS records to add in your zone
+./custom-domain.sh check   # verify CNAME + TXT propagation
+./custom-domain.sh bind      # register hostname and managed TLS cert
+```
+
+Set `CUSTOM_DOMAIN=genesisrk.mftools.xyz` in `.env` if you use a different hostname.
+
 **Commands:**
 
 - `./container-app.sh all` – build image, push to ACR, run `az containerapp up` (create/update app and environment)

@@ -7,7 +7,8 @@ RUN go mod download
 COPY . .
 # Use bfd linker (Alpine has ld.bfd; gold may be missing on some arches)
 ENV CGO_LDFLAGS="-fuse-ld=bfd"
-RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /hangar .
+ARG GO_BUILD_VERBOSE=
+RUN CGO_ENABLED=1 go build ${GO_BUILD_VERBOSE:+-v} -ldflags="-s -w" -o /hangar .
 
 # Build Vue frontend
 FROM node:20-alpine AS frontend-builder

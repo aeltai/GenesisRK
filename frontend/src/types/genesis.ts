@@ -21,6 +21,9 @@ export interface TreeNode {
   label: string
   kind: string
   count: number
+  description?: string
+  version?: string
+  category?: string
   children?: TreeNode[]
 }
 
@@ -41,7 +44,6 @@ export interface GenerateRequest {
   includeWindows: boolean
   k3sVersions: string[]
   rke2Versions: string[]
-  rkeVersions: string[]
   /** Optional destination registry for mirror/save/load and Hauler; used in Next steps commands. */
   destinationRegistry?: string
 }

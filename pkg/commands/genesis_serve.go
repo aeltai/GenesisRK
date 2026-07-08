@@ -128,15 +128,21 @@ func init() {
 
 // TreeNodeJSON is the JSON representation of treeNode for API responses.
 type TreeNodeJSON struct {
-	ID       string         `json:"id"`
-	Label    string         `json:"label"`
-	Kind     string         `json:"kind"`
-	Count    int            `json:"count"`
-	Children []TreeNodeJSON `json:"children,omitempty"`
+	ID          string         `json:"id"`
+	Label       string         `json:"label"`
+	Kind        string         `json:"kind"`
+	Count       int            `json:"count"`
+	Description string         `json:"description,omitempty"`
+	Version     string         `json:"version,omitempty"`
+	Category    string         `json:"category,omitempty"`
+	Children    []TreeNodeJSON `json:"children,omitempty"`
 }
 
 func treeNodeToJSON(n treeNode) TreeNodeJSON {
-	out := TreeNodeJSON{ID: n.Id, Label: n.Label, Kind: n.Kind, Count: n.Count}
+	out := TreeNodeJSON{
+		ID: n.Id, Label: n.Label, Kind: n.Kind, Count: n.Count,
+		Description: n.Description, Version: n.Version, Category: n.Category,
+	}
 	if len(n.Children) > 0 {
 		out.Children = make([]TreeNodeJSON, 0, len(n.Children))
 		for _, c := range n.Children {
@@ -989,9 +995,10 @@ func handleCheckAvailability(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type result struct {
-		img    string
-		status string // "ok", "not_found", "error"
-		detail string
+		img       string
+		status    string // "ok", "not_found", "error"
+		detail    string
+		sizeBytes int64
 	}
 
 	results := make([]result, len(req.Images))
@@ -1005,15 +1012,19 @@ func handleCheckAvailability(w http.ResponseWriter, r *http.Request) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			status, detail := checkImageAvailability(image)
-			results[idx] = result{img: image, status: status, detail: detail}
+			status, detail, sizeBytes := checkImageAvailability(image)
+			results[idx] = result{img: image, status: status, detail: detail, sizeBytes: sizeBytes}
 		}(i, img)
 	}
 	wg.Wait()
 
 	out := make(map[string]interface{})
 	for _, res := range results {
-		out[res.img] = map[string]string{"status": res.status, "detail": res.detail}
+		entry := map[string]interface{}{"status": res.status, "detail": res.detail}
+		if res.sizeBytes > 0 {
+			entry["sizeBytes"] = res.sizeBytes
+		}
+		out[res.img] = entry
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1021,7 +1032,8 @@ func handleCheckAvailability(w http.ResponseWriter, r *http.Request) {
 }
 
 // checkImageAvailability checks if an image exists in its registry using Docker Registry HTTP API v2.
-func checkImageAvailability(image string) (status, detail string) {
+// When found, sizeBytes is the compressed sum of config + layers (linux/amd64 when manifest list).
+func checkImageAvailability(image string) (status, detail string, sizeBytes int64) {
 	registry := "registry-1.docker.io"
 	authService := "registry.docker.io"
 	repo := image
@@ -1061,40 +1073,142 @@ func checkImageAvailability(image string) (status, detail string) {
 		tokenURL := "https://auth.docker.io/token?service=" + authService + "&scope=repository:" + repo + ":pull"
 		resp, err := client.Get(tokenURL)
 		if err != nil {
-			return "error", "auth: " + err.Error()
+			return "error", "auth: " + err.Error(), 0
 		}
 		defer resp.Body.Close()
 		var tokenResp struct {
 			Token string `json:"token"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&tokenResp); err != nil {
-			return "error", "auth decode: " + err.Error()
+			return "error", "auth decode: " + err.Error(), 0
 		}
 		token = tokenResp.Token
 	}
 
+	accept := "application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json"
+
 	// HEAD request to check manifest
 	manifestURL := "https://" + registry + "/v2/" + repo + "/manifests/" + tag
 	req, _ := http.NewRequest("HEAD", manifestURL, nil)
-	req.Header.Set("Accept", "application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json")
+	req.Header.Set("Accept", accept)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return "error", err.Error()
+		return "error", err.Error(), 0
 	}
-	defer resp.Body.Close()
+	resp.Body.Close()
 
 	switch resp.StatusCode {
 	case 200:
-		return "ok", ""
+		size, sizeErr := fetchRegistryImageSize(client, registry, repo, tag, token, accept)
+		if sizeErr != nil {
+			return "ok", "size unavailable: " + sizeErr.Error(), 0
+		}
+		return "ok", "", size
 	case 401:
-		return "not_found", "unauthorized (image may not exist or requires auth)"
+		return "not_found", "unauthorized (image may not exist or requires auth)", 0
 	case 404:
-		return "not_found", "image not found in registry"
+		return "not_found", "image not found in registry", 0
 	default:
-		return "error", "HTTP " + resp.Status
+		return "error", "HTTP " + resp.Status, 0
 	}
+}
+
+func fetchRegistryImageSize(client *http.Client, registry, repo, ref, token, accept string) (int64, error) {
+	body, err := registryGET(client, registry, repo, ref, token, accept)
+	if err != nil {
+		return 0, err
+	}
+	defer body.Close()
+	raw, err := io.ReadAll(io.LimitReader(body, 2<<20))
+	if err != nil {
+		return 0, err
+	}
+	return parseManifestSize(client, registry, repo, token, accept, raw)
+}
+
+func registryGET(client *http.Client, registry, repo, ref, token, accept string) (io.ReadCloser, error) {
+	url := "https://" + registry + "/v2/" + repo + "/manifests/" + ref
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Accept", accept)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode != 200 {
+		resp.Body.Close()
+		return nil, fmt.Errorf("HTTP %s", resp.Status)
+	}
+	return resp.Body, nil
+}
+
+func parseManifestSize(client *http.Client, registry, repo, token, accept string, raw []byte) (int64, error) {
+	var meta struct {
+		MediaType string `json:"mediaType"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return 0, err
+	}
+	if strings.Contains(meta.MediaType, "manifest.list") || strings.Contains(meta.MediaType, "image.index") {
+		var index struct {
+			Manifests []struct {
+				Digest   string `json:"digest"`
+				Platform struct {
+					Architecture string `json:"architecture"`
+					OS           string `json:"os"`
+				} `json:"platform"`
+			} `json:"manifests"`
+		}
+		if err := json.Unmarshal(raw, &index); err != nil {
+			return 0, err
+		}
+		digest := ""
+		for _, m := range index.Manifests {
+			if m.Platform.OS == "linux" && m.Platform.Architecture == "amd64" {
+				digest = m.Digest
+				break
+			}
+		}
+		if digest == "" && len(index.Manifests) > 0 {
+			digest = index.Manifests[0].Digest
+		}
+		if digest == "" {
+			return 0, fmt.Errorf("empty manifest index")
+		}
+		body, err := registryGET(client, registry, repo, digest, token, accept)
+		if err != nil {
+			return 0, err
+		}
+		defer body.Close()
+		raw, err = io.ReadAll(io.LimitReader(body, 2<<20))
+		if err != nil {
+			return 0, err
+		}
+	}
+	var manifest struct {
+		Config struct {
+			Size int64 `json:"size"`
+		} `json:"config"`
+		Layers []struct {
+			Size int64 `json:"size"`
+		} `json:"layers"`
+	}
+	if err := json.Unmarshal(raw, &manifest); err != nil {
+		return 0, err
+	}
+	var total int64
+	total += manifest.Config.Size
+	for _, l := range manifest.Layers {
+		total += l.Size
+	}
+	return total, nil
 }

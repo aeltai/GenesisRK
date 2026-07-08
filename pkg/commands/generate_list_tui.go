@@ -14,11 +14,14 @@ import (
 
 // treeNode is one row in the tree: preset, group, chart folder, chart, or image (display-only).
 type treeNode struct {
-	Id       string
-	Label    string
-	Kind     string // preset, component, chart_all, chart, image
-	Count    int
-	Children []treeNode
+	Id          string
+	Label       string
+	Kind        string // preset, component, chart_all, chart, image
+	Count       int
+	Description string // optional tooltip text (Rancher component/chart context)
+	Version     string // chart or image tag version when known
+	Category    string // chart category (monitoring, logging, etc.)
+	Children    []treeNode
 }
 
 // treeRow is a flattened row for display (with depth for indent).
