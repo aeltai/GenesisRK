@@ -40,6 +40,9 @@ function goBackToApp() {
   window.location.hash = ''
   updatePageFromHash()
 }
+function goToApp() {
+  goBackToApp()
+}
 onMounted(() => {
   updatePageFromHash()
   window.addEventListener('hashchange', updatePageFromHash)
@@ -226,11 +229,6 @@ function backToStep1() {
 
 <template>
   <div class="app">
-    <template v-if="page === 'docs'">
-      <DocsViewer @back="goBackToApp" />
-    </template>
-
-    <template v-else>
     <header class="topbar">
       <div class="topbar-start">
         <div class="topbar-brand">
@@ -242,17 +240,35 @@ function backToStep1() {
         </p>
       </div>
       <div class="topbar-actions">
+        <a
+          href="#"
+          class="topbar-btn"
+          :class="{ 'topbar-btn-active': page === 'app' }"
+          title="Image list generator"
+          @click.prevent="goToApp"
+        >Generator</a>
+        <a
+          href="#docs"
+          class="topbar-btn"
+          :class="{ 'topbar-btn-active': page === 'docs' }"
+          title="Documentation"
+        >Docs</a>
         <a href="https://github.com/aeltai/Hangar-Genesis" target="_blank" rel="noopener noreferrer" class="topbar-btn" title="GitHub Repository">
           <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
           GitHub
         </a>
-        <a href="#docs" class="topbar-btn" title="Documentation">Docs</a>
         <button type="button" class="topbar-btn" :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'" @click="toggleTheme">
           {{ theme === 'dark' ? 'Light' : 'Dark' }}
         </button>
       </div>
     </header>
+
     <main class="main">
+      <div v-if="page === 'docs'" class="panel docs-panel">
+        <DocsViewer />
+      </div>
+
+      <template v-else>
       <div v-if="step === 'step1'" class="panel step1-panel">
         <div class="step1-layout">
           <div class="step1-form">
@@ -323,6 +339,16 @@ function backToStep1() {
                 <li v-if="genRequest.distros.includes('rke')"><a href="https://rke.docs.rancher.com/" target="_blank" rel="noopener noreferrer">RKE1</a></li>
               </ul>
             </div>
+            <div class="details-section details-section-docs">
+              <h4 class="details-heading">GenesisRK docs</h4>
+              <ul class="details-links">
+                <li><a href="#docs">Overview</a></li>
+                <li><a href="#docs/getting-started">Getting started</a></li>
+                <li><a href="#docs/cli">CLI reference</a></li>
+                <li><a href="#docs/api">REST API</a></li>
+                <li><a href="#docs">All guides →</a></li>
+              </ul>
+            </div>
           </aside>
         </div>
       </div>
@@ -361,6 +387,7 @@ function backToStep1() {
         />
         <p v-if="exportError" class="error">{{ exportError }}</p>
       </div>
+      </template>
     </main>
 
     <footer class="footer">
@@ -374,7 +401,6 @@ function backToStep1() {
       <span class="footer-sep">·</span>
       <a href="https://github.com/aeltai" target="_blank" rel="noopener noreferrer">@aeltai</a>
     </footer>
-    </template>
   </div>
 </template>
 
@@ -468,6 +494,11 @@ function backToStep1() {
 .topbar-btn:hover {
   border-color: var(--cyan);
   color: var(--cyan);
+}
+.topbar-btn-active {
+  border-color: var(--cyan);
+  color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 12%, var(--bg));
 }
 .docs-page {
   min-height: 100vh;
@@ -575,6 +606,20 @@ function backToStep1() {
 .step1-panel {
   padding: 0;
   overflow: hidden;
+}
+.docs-panel {
+  padding: 0;
+  overflow: hidden;
+  min-height: calc(100vh - 130px);
+}
+.details-section-docs {
+  margin-top: 0.5rem;
+  padding-top: 0.75rem;
+  border-top: 1px dashed var(--border);
+}
+.details-section-docs a {
+  color: var(--cyan);
+  font-weight: 500;
 }
 .step1-layout {
   display: grid;
