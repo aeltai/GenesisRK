@@ -1,9 +1,13 @@
 # Build GenesisRK binary (CGO required for Trivy scan via hangar)
 FROM golang:1.24-alpine AS go-builder
-RUN apk add --no-cache build-base gpgme-dev btrfs-progs-dev
+RUN apk add --no-cache build-base gpgme-dev btrfs-progs-dev git
 WORKDIR /src
+
+# Hangar is the only first-party dependency; clone at build time for Docker/CI.
+RUN git clone --depth 1 --branch v1.9.4 https://github.com/cnrancher/hangar.git /hangar
+
 COPY go.mod go.sum ./
-RUN go mod download
+RUN sed -i 's|=> ../hangar|=> /hangar|' go.mod && go mod download
 COPY . .
 ENV CGO_LDFLAGS="-fuse-ld=bfd"
 RUN CGO_ENABLED=1 go build -ldflags="-s -w" -o /genesisrk .
