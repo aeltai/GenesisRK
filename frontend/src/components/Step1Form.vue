@@ -164,210 +164,233 @@ onUnmounted(() => {
 
 <template>
   <div class="step1">
-    <h2 class="step-title">Step 1: Source &amp; options</h2>
+    <header class="step-header">
+      <h2 class="step-title">Step 1: Source &amp; options</h2>
+      <p class="step-desc">Configure Rancher versions, distros, and network options before generating the image tree.</p>
+    </header>
 
-    <div class="field rancher-version-field">
-      <label>Rancher version(s)</label>
-      <p class="field-hint">Select one or more; the image list will include images for all selected versions.</p>
-      <template v-if="availableRancherVersions?.length > 0">
-        <div class="rancher-version-dropdown">
-          <button
-            type="button"
-            class="rancher-version-trigger"
-            :class="{ open: rancherVersionDropdownOpen }"
-            @click.stop="rancherVersionDropdownOpen = !rancherVersionDropdownOpen"
-          >
-            <span class="trigger-text">{{ rancherVersionSummary }}</span>
-            <span class="trigger-arrow">{{ rancherVersionDropdownOpen ? '▲' : '▼' }}</span>
-          </button>
-          <div v-show="rancherVersionDropdownOpen" class="rancher-version-panel">
-            <div class="rancher-version-list">
-              <label
-                v-for="rv in availableRancherVersions"
-                :key="rv.version"
-                class="rancher-version-option"
-              >
-                <input
-                  type="checkbox"
-                  :checked="rancherVersions.includes(rv.version)"
-                  @change="toggleRancherVersion(rv.version)"
-                />
-                <span class="option-version">{{ rv.version }}</span>
-                <span v-if="rv.date" class="option-date">{{ rv.date }}</span>
-              </label>
+    <div class="form-grid">
+      <!-- Rancher versions -->
+      <section class="form-section">
+        <h3 class="section-title">Rancher versions</h3>
+        <div class="field-stack">
+          <div class="field rancher-version-field">
+            <label>Version(s)</label>
+            <p class="field-hint">Select one or more; the image list includes all selected versions.</p>
+            <template v-if="availableRancherVersions?.length > 0">
+              <div class="rancher-version-dropdown">
+                <button
+                  type="button"
+                  class="rancher-version-trigger"
+                  :class="{ open: rancherVersionDropdownOpen }"
+                  @click.stop="rancherVersionDropdownOpen = !rancherVersionDropdownOpen"
+                >
+                  <span class="trigger-text">{{ rancherVersionSummary }}</span>
+                  <span class="trigger-arrow">{{ rancherVersionDropdownOpen ? '▲' : '▼' }}</span>
+                </button>
+                <div v-show="rancherVersionDropdownOpen" class="rancher-version-panel">
+                  <div class="rancher-version-list">
+                    <label
+                      v-for="rv in availableRancherVersions"
+                      :key="rv.version"
+                      class="rancher-version-option"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="rancherVersions.includes(rv.version)"
+                        @change="toggleRancherVersion(rv.version)"
+                      />
+                      <span class="option-version">{{ rv.version }}</span>
+                      <span v-if="rv.date" class="option-date">{{ rv.date }}</span>
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </template>
+            <input
+              v-else
+              v-model="rancherVersion"
+              type="text"
+              placeholder="v2.13.1"
+              class="input"
+            />
+            <span v-if="optionsLoading" class="loading-indicator">Loading…</span>
+          </div>
+          <label class="check option-toggle">
+            <input v-model="includeGitHubVersions" type="checkbox" />
+            Include versions from GitHub (K3s/RKE2 release tags)
+          </label>
+          <label v-if="includeGitHubVersions" class="check option-toggle nested">
+            <input v-model="includeRC" type="checkbox" />
+            Include pre-release (RC/alpha/beta) versions
+          </label>
+          <p v-if="loadError" class="error-msg">{{ loadError }}</p>
+        </div>
+      </section>
+
+      <!-- Image source -->
+      <section class="form-section">
+        <h3 class="section-title">
+          <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/rancher.svg" alt="" class="ctx-icon" />
+          Image source
+        </h3>
+        <div class="field-stack">
+          <div class="radio-group stacked">
+            <label class="radio">
+              <input v-model="isRPMGC" type="radio" :value="false" />
+              <span>
+                <strong>Community</strong>
+                <span class="source-detail">GitHub releases (k3s-io/k3s, rancher/rke2)</span>
+              </span>
+            </label>
+            <label class="radio">
+              <input v-model="isRPMGC" type="radio" :value="true" />
+              <span>
+                <strong>Rancher Prime</strong>
+                <span class="source-detail">prime.ribs.rancher.io (curated/certified)</span>
+              </span>
+            </label>
+          </div>
+          <p class="source-note">Both use KDM (releases.rancher.com) and rancher/charts on GitHub.</p>
+          <label class="check option-toggle">
+            <input v-model="includeAppCollection" type="checkbox" />
+            Include Application Collection (dp.apps.rancher.io)
+          </label>
+          <div v-if="includeAppCollection" class="inline-inputs">
+            <input v-model="appUser" type="text" placeholder="API username" class="input" />
+            <input v-model="appPassword" type="password" placeholder="API password/token" class="input" />
+          </div>
+        </div>
+      </section>
+
+      <!-- Distros & platform -->
+      <section class="form-section">
+        <h3 class="section-title">Distros &amp; platform</h3>
+        <div class="field-stack">
+          <div class="check-group distros-group">
+            <label class="check chip-check">
+              <input type="checkbox" :checked="distros.includes('k3s')" @change="toggleDistro('k3s')" />
+              <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/k3s.svg" alt="" class="ctx-icon ctx-icon-sm" />
+              K3s
+            </label>
+            <label class="check chip-check">
+              <input type="checkbox" :checked="distros.includes('rke2')" @change="toggleDistro('rke2')" />
+              <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/rancher.svg" alt="" class="ctx-icon ctx-icon-sm" />
+              RKE2
+            </label>
+            <label v-if="options?.hasRKE1" class="check chip-check">
+              <input type="checkbox" :checked="distros.includes('rke')" @change="toggleDistro('rke')" />
+              RKE1
+            </label>
+          </div>
+          <div class="sub-field">
+            <label class="sub-label">Platform</label>
+            <div class="radio-group inline">
+              <label class="radio"><input v-model="includeWindows" type="radio" :value="false" /> Linux only</label>
+              <label class="radio"><input v-model="includeWindows" type="radio" :value="true" /> Linux + Windows</label>
             </div>
           </div>
         </div>
-      </template>
-      <input
-        v-else
-        v-model="rancherVersion"
-        type="text"
-        placeholder="v2.13.1"
-        class="input"
-      />
-      <span v-if="optionsLoading" class="loading-indicator">Loading…</span>
-    </div>
-    <label class="check rc-toggle">
-      <input v-model="includeGitHubVersions" type="checkbox" />
-      Include versions from GitHub (K3s/RKE2 release tags; shows newer than KDM)
-    </label>
-    <label v-if="includeGitHubVersions" class="check rc-toggle">
-      <input v-model="includeRC" type="checkbox" />
-      Include pre-release (RC/alpha/beta) versions from GitHub
-    </label>
-    <p v-if="loadError" class="error-msg">{{ loadError }}</p>
+      </section>
 
-    <div class="field source-field">
-      <label class="label-with-icon">
-        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/rancher.svg" alt="" class="ctx-icon" />
-        Image list source
-      </label>
-      <div class="radio-group">
-        <label class="radio">
-          <input v-model="isRPMGC" type="radio" :value="false" />
-          <span>Community <span class="source-detail">image lists from GitHub releases (k3s-io/k3s, rancher/rke2)</span></span>
-        </label>
-        <label class="radio">
-          <input v-model="isRPMGC" type="radio" :value="true" />
-          <span>Rancher Prime <span class="source-detail">image lists from prime.ribs.rancher.io (curated/certified)</span></span>
-        </label>
-      </div>
-      <p class="source-note">Both sources use the same KDM (releases.rancher.com) and chart repos (rancher/charts on GitHub).</p>
-    </div>
-
-    <div class="field">
-      <label class="checkbox-label">
-        <input v-model="includeAppCollection" type="checkbox" />
-        Include Application Collection (dp.apps.rancher.io)
-      </label>
-      <template v-if="includeAppCollection">
-        <input v-model="appUser" type="text" placeholder="API username" class="input inline" />
-        <input v-model="appPassword" type="password" placeholder="API password/token" class="input inline" />
-      </template>
-    </div>
-
-    <div class="field">
-      <label>Distros</label>
-      <div class="check-group distros-group">
-        <label class="check">
-          <input type="checkbox" :checked="distros.includes('k3s')" @change="toggleDistro('k3s')" />
-          <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/k3s.svg" alt="" class="ctx-icon ctx-icon-sm" />
-          K3s
-        </label>
-        <label class="check">
-          <input type="checkbox" :checked="distros.includes('rke2')" @change="toggleDistro('rke2')" />
-          <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/rancher.svg" alt="" class="ctx-icon ctx-icon-sm" />
-          RKE2
-        </label>
-        <label class="check" v-if="options?.hasRKE1">
-          <input type="checkbox" :checked="distros.includes('rke')" @change="toggleDistro('rke')" />
-          RKE1
-        </label>
-      </div>
-    </div>
-
-    <div v-if="options?.capabilities" class="field versions">
-      <label class="label-with-icon">
-        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/kubernetes.svg" alt="" class="ctx-icon" />
-        Kubernetes versions
-      </label>
-      <p v-if="!includeGitHubVersions" class="version-gh-hint">
-        Only KDM-supported versions are shown. Enable <strong>Include versions from GitHub</strong> above to add newer K3s/RKE2 versions from GitHub releases.
-      </p>
-      <div class="version-legend">
-        <span class="version-legend-item"><span class="legend-swatch swatch-kdm"></span> KDM (Rancher supported)</span>
-        <span v-if="includeGitHubVersions" class="version-legend-item"><span class="legend-swatch swatch-gh"></span> GitHub release (newer)</span>
-      </div>
-      <div v-if="distros.includes('k3s') && options?.capabilities?.k3s" class="version-block">
-        <div class="version-header">
-          <span class="version-label">K3s</span>
-          <label class="check version-all">
-            <input type="checkbox" :checked="k3sVersions.includes('all')" @change="k3sVersions = k3sVersions.includes('all') ? [] : ['all']" />
-            All
-          </label>
+      <!-- Network -->
+      <section v-if="distros.length > 0" class="form-section">
+        <h3 class="section-title">
+          <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/nginx.svg" alt="" class="ctx-icon" />
+          Network
+        </h3>
+        <div class="field-stack">
+          <div class="sub-field">
+            <label class="sub-label">CNI</label>
+            <select v-model="cni" class="input select">
+              <option v-for="o in cniOptions" :key="o.id" :value="o.id">{{ o.label }}{{ o.hint ? ' (' + o.hint + ')' : '' }}</option>
+            </select>
+          </div>
+          <div class="sub-field">
+            <label class="sub-label">Load balancer / Ingress</label>
+            <div class="check-group lb-options">
+              <template v-if="distros.includes('k3s')">
+                <label class="check"><input v-model="lbK3sKlipper" type="checkbox" /> K3s Klipper</label>
+                <label class="check"><input v-model="lbK3sTraefik" type="checkbox" /> K3s Traefik</label>
+              </template>
+              <template v-if="distros.includes('rke2')">
+                <label class="check"><input v-model="lbRKE2Nginx" type="checkbox" /> RKE2 NGINX</label>
+                <label class="check"><input v-model="lbRKE2Traefik" type="checkbox" /> RKE2 Traefik</label>
+              </template>
+            </div>
+          </div>
         </div>
-        <div v-if="!k3sVersions.includes('all')" class="version-chips">
-          <label v-for="v in (options?.capabilities?.k3s?.versions ?? [])" :key="v" class="version-chip" :class="{ active: k3sVersions.includes(v), 'chip-github': versionSource('k3s', v) === 'github', 'chip-kdm': versionSource('k3s', v) === 'kdm' || versionSource('k3s', v) === 'both' }">
-            <input type="checkbox" :checked="k3sVersions.includes(v)" @change="toggleVersion(k3sVersions, v, val => k3sVersions = val)" hidden />
-            {{ v }}
-            <span v-if="versionSource('k3s', v) === 'github'" class="chip-badge" title="From GitHub releases (not in KDM)">GH</span>
-          </label>
-        </div>
-      </div>
-      <div v-if="distros.includes('rke2') && options?.capabilities?.rke2" class="version-block">
-        <div class="version-header">
-          <span class="version-label">RKE2</span>
-          <label class="check version-all">
-            <input type="checkbox" :checked="rke2Versions.includes('all')" @change="rke2Versions = rke2Versions.includes('all') ? [] : ['all']" />
-            All
-          </label>
-        </div>
-        <div v-if="!rke2Versions.includes('all')" class="version-chips">
-          <label v-for="v in (options?.capabilities?.rke2?.versions ?? [])" :key="v" class="version-chip" :class="{ active: rke2Versions.includes(v), 'chip-github': versionSource('rke2', v) === 'github', 'chip-kdm': versionSource('rke2', v) === 'kdm' || versionSource('rke2', v) === 'both' }">
-            <input type="checkbox" :checked="rke2Versions.includes(v)" @change="toggleVersion(rke2Versions, v, val => rke2Versions = val)" hidden />
-            {{ v }}
-            <span v-if="versionSource('rke2', v) === 'github'" class="chip-badge" title="From GitHub releases (not in KDM)">GH</span>
-          </label>
-        </div>
-      </div>
-      <div v-if="distros.includes('rke') && options?.capabilities?.rke" class="version-block">
-        <div class="version-header">
-          <span class="version-label">RKE1</span>
-          <label class="check version-all">
-            <input type="checkbox" :checked="rkeVersions.includes('all')" @change="rkeVersions = rkeVersions.includes('all') ? [] : ['all']" />
-            All
-          </label>
-        </div>
-        <div v-if="!rkeVersions.includes('all')" class="version-chips">
-          <label v-for="v in (options?.capabilities?.rke?.versions ?? [])" :key="v" class="version-chip" :class="{ active: rkeVersions.includes(v) }">
-            <input type="checkbox" :checked="rkeVersions.includes(v)" @change="toggleVersion(rkeVersions, v, val => rkeVersions = val)" hidden />
-            {{ v }}
-          </label>
-        </div>
-      </div>
-    </div>
+      </section>
 
-    <div class="field">
-      <label>Platform</label>
-      <div class="radio-group">
-        <label class="radio">
-          <input v-model="includeWindows" type="radio" :value="false" />
-          Linux only
-        </label>
-        <label class="radio">
-          <input v-model="includeWindows" type="radio" :value="true" />
-          Linux + Windows
-        </label>
-      </div>
-    </div>
-
-    <div v-if="distros.length > 0" class="field">
-      <label>CNI</label>
-      <select v-model="cni" class="input select" title="K3s default: Flannel. RKE2 default: Canal. Choose per distro docs.">
-        <option v-for="o in cniOptions" :key="o.id" :value="o.id">{{ o.label }}{{ o.hint ? ' (' + o.hint + ')' : '' }}</option>
-      </select>
-    </div>
-
-    <div v-if="distros.length > 0" class="field loadbalancer-field">
-      <label class="label-with-icon">
-        <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/nginx.svg" alt="" class="ctx-icon" />
-        Load balancer / Ingress
-      </label>
-      <div class="check-group lb-options">
-        <template v-if="distros.includes('k3s')">
-          <label class="check"><input v-model="lbK3sKlipper" type="checkbox" /> K3s Klipper</label>
-          <label class="check"><input v-model="lbK3sTraefik" type="checkbox" /> K3s Traefik</label>
-        </template>
-        <template v-if="distros.includes('rke2')">
-          <label class="check"><input v-model="lbRKE2Nginx" type="checkbox" /> RKE2 NGINX</label>
-          <label class="check"><input v-model="lbRKE2Traefik" type="checkbox" /> RKE2 Traefik</label>
-        </template>
-      </div>
+      <!-- Kubernetes versions (full width) -->
+      <section v-if="options?.capabilities" class="form-section form-section-wide">
+        <h3 class="section-title">
+          <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/kubernetes.svg" alt="" class="ctx-icon" />
+          Kubernetes versions
+        </h3>
+        <div class="field-stack">
+          <p v-if="!includeGitHubVersions" class="version-gh-hint">
+            Only KDM-supported versions shown. Enable <strong>Include versions from GitHub</strong> to add newer K3s/RKE2 releases.
+          </p>
+          <div class="version-legend">
+            <span class="version-legend-item"><span class="legend-swatch swatch-kdm"></span> KDM (Rancher supported)</span>
+            <span v-if="includeGitHubVersions" class="version-legend-item"><span class="legend-swatch swatch-gh"></span> GitHub release (newer)</span>
+          </div>
+          <div class="version-grid">
+            <div v-if="distros.includes('k3s') && options?.capabilities?.k3s" class="version-block">
+              <div class="version-header">
+                <span class="version-label">K3s</span>
+                <label class="check version-all">
+                  <input type="checkbox" :checked="k3sVersions.includes('all')" @change="k3sVersions = k3sVersions.includes('all') ? [] : ['all']" />
+                  All
+                </label>
+              </div>
+              <div v-if="!k3sVersions.includes('all')" class="version-chips">
+                <label v-for="v in (options?.capabilities?.k3s?.versions ?? [])" :key="v" class="version-chip" :class="{ active: k3sVersions.includes(v), 'chip-github': versionSource('k3s', v) === 'github', 'chip-kdm': versionSource('k3s', v) === 'kdm' || versionSource('k3s', v) === 'both' }">
+                  <input type="checkbox" :checked="k3sVersions.includes(v)" @change="toggleVersion(k3sVersions, v, val => k3sVersions = val)" hidden />
+                  {{ v }}
+                  <span v-if="versionSource('k3s', v) === 'github'" class="chip-badge" title="From GitHub releases">GH</span>
+                </label>
+              </div>
+            </div>
+            <div v-if="distros.includes('rke2') && options?.capabilities?.rke2" class="version-block">
+              <div class="version-header">
+                <span class="version-label">RKE2</span>
+                <label class="check version-all">
+                  <input type="checkbox" :checked="rke2Versions.includes('all')" @change="rke2Versions = rke2Versions.includes('all') ? [] : ['all']" />
+                  All
+                </label>
+              </div>
+              <div v-if="!rke2Versions.includes('all')" class="version-chips">
+                <label v-for="v in (options?.capabilities?.rke2?.versions ?? [])" :key="v" class="version-chip" :class="{ active: rke2Versions.includes(v), 'chip-github': versionSource('rke2', v) === 'github', 'chip-kdm': versionSource('rke2', v) === 'kdm' || versionSource('rke2', v) === 'both' }">
+                  <input type="checkbox" :checked="rke2Versions.includes(v)" @change="toggleVersion(rke2Versions, v, val => rke2Versions = val)" hidden />
+                  {{ v }}
+                  <span v-if="versionSource('rke2', v) === 'github'" class="chip-badge" title="From GitHub releases">GH</span>
+                </label>
+              </div>
+            </div>
+            <div v-if="distros.includes('rke') && options?.capabilities?.rke" class="version-block">
+              <div class="version-header">
+                <span class="version-label">RKE1</span>
+                <label class="check version-all">
+                  <input type="checkbox" :checked="rkeVersions.includes('all')" @change="rkeVersions = rkeVersions.includes('all') ? [] : ['all']" />
+                  All
+                </label>
+              </div>
+              <div v-if="!rkeVersions.includes('all')" class="version-chips">
+                <label v-for="v in (options?.capabilities?.rke?.versions ?? [])" :key="v" class="version-chip" :class="{ active: rkeVersions.includes(v) }">
+                  <input type="checkbox" :checked="rkeVersions.includes(v)" @change="toggleVersion(rkeVersions, v, val => rkeVersions = val)" hidden />
+                  {{ v }}
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
 
     <div class="actions">
-      <button type="button" class="btn btn-primary" @click="$emit('generate')">Generate</button>
+      <button type="button" class="btn btn-primary" @click="$emit('generate')">Generate image tree</button>
     </div>
   </div>
 </template>
@@ -377,52 +400,92 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 1rem;
+  height: 100%;
+}
+.step-header {
+  margin-bottom: 0.25rem;
 }
 .step-title {
-  font-size: 1.25rem;
+  font-size: 1.1rem;
+  font-weight: 700;
   color: var(--cyan);
-  margin: 0 0 0.5rem 0;
+  margin: 0 0 0.25rem 0;
+}
+.step-desc {
+  margin: 0;
+  font-size: 0.82rem;
+  opacity: 0.7;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.85rem;
+  flex: 1;
+}
+.form-section {
+  background: color-mix(in srgb, var(--bg) 40%, var(--panel));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  min-width: 0;
+}
+.form-section-wide {
+  grid-column: 1 / -1;
+}
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text);
+  opacity: 0.85;
+  margin: 0 0 0.75rem 0;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.field-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
 }
 .field {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.35rem;
 }
-.field label:first-child {
-  min-width: 140px;
+.field label {
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+.field-hint {
+  margin: 0;
+  font-size: 0.78rem;
+  opacity: 0.65;
 }
 .input {
-  padding: 0.4rem 0.6rem;
+  padding: 0.45rem 0.65rem;
   border: 1px solid var(--border);
-  border-radius: 4px;
+  border-radius: 6px;
   background: var(--bg);
   color: var(--text);
-}
-.input.inline {
-  margin-left: 0.5rem;
-  width: 180px;
+  font-size: 0.88rem;
+  width: 100%;
 }
 .select {
-  min-width: 160px;
+  max-width: 280px;
 }
-.select.narrow {
-  min-width: 200px;
-}
-.radio-group,
-.field-hint {
-  margin: 0 0 0.5rem 0;
-  font-size: 0.85rem;
-  opacity: 0.88;
-}
-.rancher-version-field {
-  flex-direction: column;
-  align-items: stretch;
+.inline-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
 }
 .rancher-version-dropdown {
   position: relative;
   width: 100%;
-  max-width: 320px;
+  max-width: 360px;
 }
 .rancher-version-trigger {
   display: flex;
@@ -430,7 +493,7 @@ onUnmounted(() => {
   justify-content: space-between;
   width: 100%;
   padding: 0.5rem 0.75rem;
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   font-family: inherit;
   color: var(--text);
   background: var(--bg);
@@ -444,154 +507,179 @@ onUnmounted(() => {
   border-color: var(--cyan);
 }
 .trigger-arrow {
-  font-size: 0.7rem;
-  opacity: 0.8;
+  font-size: 0.65rem;
+  opacity: 0.7;
   margin-left: 0.5rem;
 }
 .rancher-version-panel {
   position: absolute;
   top: 100%;
   left: 0;
+  right: 0;
   margin-top: 4px;
-  min-width: 100%;
-  max-height: 280px;
+  max-height: 260px;
   overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--border);
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
   z-index: 50;
 }
 .rancher-version-list {
-  padding: 0.35rem 0;
+  padding: 0.3rem 0;
 }
 .rancher-version-option {
   display: flex;
   align-items: center;
   gap: 8px;
   padding: 0.4rem 0.75rem;
-  font-size: 0.88rem;
+  font-size: 0.85rem;
   cursor: pointer;
   user-select: none;
 }
 .rancher-version-option:hover {
-  background: color-mix(in srgb, var(--cyan) 15%, transparent);
-}
-.rancher-version-option input {
-  flex-shrink: 0;
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
 }
 .option-version {
   font-weight: 600;
 }
 .option-date {
-  font-size: 0.8rem;
-  opacity: 0.85;
-}
-.label-with-icon {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+  font-size: 0.75rem;
+  opacity: 0.7;
+  margin-left: auto;
 }
 .ctx-icon {
-  width: 20px;
-  height: 20px;
+  width: 18px;
+  height: 18px;
   object-fit: contain;
   flex-shrink: 0;
   filter: invert(1);
 }
 .ctx-icon-sm {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
 }
 [data-theme="light"] .ctx-icon {
   filter: none;
 }
-.distros-group .check {
+.option-toggle {
+  font-size: 0.82rem;
+  opacity: 0.88;
+}
+.option-toggle.nested {
+  margin-left: 1.25rem;
+  opacity: 0.8;
+}
+.check-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+.chip-check {
   display: inline-flex;
   align-items: center;
   gap: 5px;
+  padding: 0.35rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: border-color 0.15s;
 }
-.check-group {
+.chip-check:has(input:checked) {
+  border-color: var(--cyan);
+  background: color-mix(in srgb, var(--cyan) 10%, var(--bg));
+}
+.radio-group.stacked {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.radio-group.inline {
   display: flex;
   flex-wrap: wrap;
   gap: 1rem;
 }
 .radio,
-.check,
-.checkbox-label {
+.check {
   display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  cursor: pointer;
-}
-.btn {
-  padding: 0.5rem 1rem;
-  border-radius: 4px;
-  border: 1px solid var(--border);
-  cursor: pointer;
-  font-size: 0.95rem;
-}
-.btn-primary {
-  background: var(--cyan);
-  color: var(--bg);
-  border-color: var(--cyan);
-}
-.btn-primary:hover {
-  filter: brightness(1.1);
-}
-.versions {
-  flex-direction: column;
   align-items: flex-start;
-}
-.loadbalancer-field {
-  flex-direction: column;
-  align-items: flex-start;
-}
-.lb-options {
-  margin-left: 0.2rem;
-}
-.rc-toggle {
-  margin: -0.25rem 0 0 140px;
+  gap: 0.45rem;
+  cursor: pointer;
   font-size: 0.85rem;
-  opacity: 0.85;
+}
+.radio span {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.sub-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.sub-label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.75;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.source-detail {
+  font-size: 0.78rem;
+  opacity: 0.65;
+  font-weight: 400;
+}
+.source-note {
+  font-size: 0.75rem;
+  opacity: 0.55;
+  margin: 0;
 }
 .loading-indicator {
-  font-size: 0.85rem;
-  opacity: 0.7;
-  margin-left: 0.5rem;
+  font-size: 0.8rem;
+  opacity: 0.65;
+}
+.version-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.75rem;
 }
 .version-block {
-  margin-top: 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.65rem 0.75rem;
 }
 .version-header {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.4rem;
 }
 .version-label {
-  font-weight: 600;
-  min-width: 40px;
+  font-weight: 700;
+  font-size: 0.85rem;
 }
 .version-all {
-  font-size: 0.85rem;
-  opacity: 0.9;
+  font-size: 0.8rem;
+  opacity: 0.85;
+  margin-left: auto;
 }
 .version-chips {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
-  max-height: 120px;
+  max-height: 140px;
   overflow-y: auto;
-  padding: 2px;
 }
 .version-chip {
   padding: 2px 8px;
   border-radius: 4px;
   border: 1px solid var(--border);
-  background: var(--bg);
+  background: var(--panel);
   color: var(--text);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   cursor: pointer;
   user-select: none;
   white-space: nowrap;
@@ -606,39 +694,35 @@ onUnmounted(() => {
   border-color: var(--cyan);
 }
 .version-chip.chip-kdm {
-  border-color: var(--cyan);
+  border-color: color-mix(in srgb, var(--cyan) 60%, var(--border));
 }
 .version-chip.chip-github {
   border-style: dashed;
 }
 .chip-badge {
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   font-weight: 700;
   background: var(--yellow, #eab308);
   color: #000;
   padding: 0 3px;
   border-radius: 2px;
   margin-left: 2px;
-  line-height: 1.2;
 }
 .version-gh-hint {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   opacity: 0.9;
-  margin: 0 0 0.5rem 0;
-  padding: 0.4rem 0.6rem;
-  background: color-mix(in srgb, var(--cyan) 12%, transparent);
-  border-radius: 4px;
+  margin: 0;
+  padding: 0.45rem 0.65rem;
+  background: color-mix(in srgb, var(--cyan) 10%, transparent);
+  border-radius: 6px;
   border-left: 3px solid var(--cyan);
-}
-.version-gh-hint strong {
-  font-weight: 600;
 }
 .version-legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 1rem;
-  font-size: 0.78rem;
-  opacity: 0.85;
-  margin-bottom: 0.15rem;
+  font-size: 0.75rem;
+  opacity: 0.8;
 }
 .version-legend-item {
   display: inline-flex;
@@ -659,165 +743,55 @@ onUnmounted(() => {
   background: transparent;
 }
 .actions {
-  margin-top: 0.5rem;
-}
-.rancher-select {
-  min-width: 140px;
-}
-.source-field {
-  flex-direction: column;
-  align-items: flex-start;
-}
-.source-detail {
-  font-size: 0.8rem;
-  opacity: 0.7;
-}
-.source-note {
-  font-size: 0.78rem;
-  opacity: 0.6;
-  margin: 0.25rem 0 0;
-}
-.data-sources {
-  margin-top: 1rem;
-  padding-top: 1rem;
+  display: flex;
+  justify-content: flex-end;
+  padding-top: 0.5rem;
   border-top: 1px solid var(--border);
+  margin-top: auto;
 }
-.ds-title {
-  font-size: 0.85rem;
-  color: var(--cyan);
-  margin: 0 0 0.5rem;
+.btn {
+  padding: 0.55rem 1.25rem;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  font-size: 0.9rem;
   font-weight: 600;
 }
-.ds-grid {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
+.btn-primary {
+  background: var(--cyan);
+  color: var(--bg);
+  border-color: var(--cyan);
 }
-.ds-item {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-  font-size: 0.8rem;
-}
-.ds-label {
-  min-width: 100px;
-  font-weight: 600;
-  opacity: 0.85;
-}
-.ds-value {
-  background: var(--bg);
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 0.78rem;
-  word-break: break-all;
+.btn-primary:hover {
+  filter: brightness(1.08);
 }
 .error-msg {
   color: var(--red);
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   margin: 0;
 }
 
-/* Mobile & tablet */
-@media (max-width: 768px) {
-  .step1 {
-    gap: 0.75rem;
+@media (max-width: 900px) {
+  .form-grid {
+    grid-template-columns: 1fr;
   }
-  .field {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.35rem;
-  }
-  .field label:first-child {
-    min-width: 0;
-  }
-  .input.inline {
-    margin-left: 0;
-    width: 100%;
-    max-width: 280px;
-  }
-  .select {
-    width: 100%;
-    max-width: 280px;
-    min-width: 0;
-  }
-  .rc-toggle {
-    margin-left: 0;
-  }
-  .rancher-version-dropdown {
-    max-width: 100%;
-  }
-  .check-group {
-    gap: 0.75rem;
-  }
-  .version-chips {
-    max-height: 100px;
-  }
-  .actions .btn {
-    width: 100%;
-    max-width: 200px;
+  .inline-inputs {
+    grid-template-columns: 1fr;
   }
 }
 
 @media (max-width: 480px) {
   .step-title {
-    font-size: 1.1rem;
+    font-size: 1rem;
   }
-  .field label:first-child {
-    font-size: 0.9rem;
+  .form-section {
+    padding: 0.85rem;
   }
-  .input,
-  .input.inline,
-  .select {
-    width: 100%;
-    max-width: none;
-    box-sizing: border-box;
-  }
-  .radio-group {
-    margin-left: 0;
-  }
-  .radio span,
-  .check,
-  .checkbox-label {
-    font-size: 0.9rem;
-  }
-  .source-detail {
-    display: block;
-    margin-top: 0.2rem;
-  }
-  .version-header {
-    flex-wrap: wrap;
-    gap: 0.5rem;
-  }
-  .version-label {
-    min-width: 0;
-    width: 100%;
-  }
-  .version-chips {
-    max-height: 90px;
-    gap: 3px;
-  }
-  .version-chip {
-    font-size: 0.72rem;
-    padding: 2px 6px;
-  }
-  .version-legend {
-    flex-direction: column;
-    gap: 0.25rem;
-  }
-  .ds-grid {
-    gap: 0.25rem;
-  }
-  .ds-item {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.15rem;
-  }
-  .ds-label {
-    min-width: 0;
+  .version-grid {
+    grid-template-columns: 1fr;
   }
   .actions .btn {
     width: 100%;
-    max-width: none;
   }
 }
 </style>

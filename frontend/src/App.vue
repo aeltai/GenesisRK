@@ -231,26 +231,26 @@ function backToStep1() {
     </template>
 
     <template v-else>
-    <header class="hero">
-      <div class="hero-inner">
-        <div class="hero-brand">
-          <h1 class="hero-title">Genesis</h1>
-          <span class="hero-version">v{{ VERSION }}</span>
+    <header class="topbar">
+      <div class="topbar-start">
+        <div class="topbar-brand">
+          <h1 class="topbar-title">GenesisRK</h1>
+          <span class="topbar-version">v{{ VERSION }}</span>
         </div>
-        <div class="hero-actions">
-          <a href="https://github.com/aeltai/Hangar-Genesis" target="_blank" rel="noopener noreferrer" class="hero-link" title="GitHub Repository">
-            <svg viewBox="0 0 16 16" width="18" height="18" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
-            GitHub
-          </a>
-          <a href="#docs" class="hero-link" title="Documentation">Docs</a>
-          <button type="button" class="theme-toggle" :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'" @click="toggleTheme">
-            {{ theme === 'dark' ? 'Light' : 'Dark' }}
-          </button>
-        </div>
+        <p class="topbar-tagline">
+          Build image lists for air-gapped Rancher — select versions, distros, CNI, and charts, then export.
+        </p>
       </div>
-      <p class="hero-subtitle">
-        Build image lists for air-gapped Rancher: choose Rancher version(s), distros (K3s, RKE2, RKE1), CNI, load balancer, and charts—then export one list to mirror or save.
-      </p>
+      <div class="topbar-actions">
+        <a href="https://github.com/aeltai/Hangar-Genesis" target="_blank" rel="noopener noreferrer" class="topbar-btn" title="GitHub Repository">
+          <svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+          GitHub
+        </a>
+        <a href="#docs" class="topbar-btn" title="Documentation">Docs</a>
+        <button type="button" class="topbar-btn" :title="theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'" @click="toggleTheme">
+          {{ theme === 'dark' ? 'Light' : 'Dark' }}
+        </button>
+      </div>
     </header>
     <main class="main">
       <div v-if="step === 'step1'" class="panel step1-panel">
@@ -386,90 +386,88 @@ function backToStep1() {
   background: var(--bg);
   color: var(--text);
 }
-.hero {
-  padding: 1.25rem 2rem 1.5rem;
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: 0.65rem 1.5rem;
   border-bottom: 1px solid var(--border);
-  background: linear-gradient(135deg, var(--panel) 0%, color-mix(in srgb, var(--panel) 95%, var(--border)) 100%);
-  position: relative;
+  background: var(--panel);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--border) 50%, transparent);
 }
-.hero::before {
+.topbar::before {
   content: '';
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  width: 4px;
+  width: 3px;
   background: linear-gradient(180deg, var(--cyan), var(--green));
-  border-radius: 0 2px 2px 0;
 }
-.hero-inner {
+.topbar-start {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 1.5rem;
-  flex-wrap: wrap;
-  margin-bottom: 0.75rem;
+  gap: 1.25rem;
+  min-width: 0;
+  flex: 1;
 }
-.hero-brand {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-.hero-title {
-  font-size: 2rem;
-  font-weight: 800;
-  letter-spacing: -0.03em;
-  color: var(--cyan);
-  margin: 0;
-  text-shadow: 0 0 20px color-mix(in srgb, var(--cyan) 30%, transparent);
-}
-.hero-version {
-  font-size: 0.8rem;
-  font-weight: 600;
-  opacity: 0.85;
-  color: var(--text);
-  padding: 0.2rem 0.5rem;
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--border) 40%, transparent);
-}
-.hero-actions {
+.topbar-brand {
   display: flex;
   align-items: center;
   gap: 0.5rem;
+  flex-shrink: 0;
 }
-.hero-link {
+.topbar-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--cyan);
+  margin: 0;
+}
+.topbar-version {
+  font-size: 0.7rem;
+  font-weight: 600;
+  opacity: 0.75;
+  padding: 0.15rem 0.4rem;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--border) 35%, transparent);
+}
+.topbar-tagline {
+  margin: 0;
+  font-size: 0.82rem;
+  opacity: 0.72;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-shrink: 0;
+}
+.topbar-btn {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 0.4rem 0.75rem;
-  font-size: 0.85rem;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.8rem;
   font-weight: 600;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 80%, var(--border));
+  border-radius: 6px;
+  background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
   text-decoration: none;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
+  transition: border-color 0.15s, color 0.15s;
 }
-.hero-link:hover {
+.topbar-btn:hover {
   border-color: var(--cyan);
   color: var(--cyan);
-}
-.theme-toggle {
-  padding: 0.4rem 0.75rem;
-  font-size: 0.85rem;
-  font-weight: 600;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 80%, var(--border));
-  border: 1px solid var(--border);
-  color: var(--text);
-  cursor: pointer;
-  transition: border-color 0.2s;
-}
-.theme-toggle:hover {
-  border-color: var(--cyan);
 }
 .docs-page {
   min-height: 100vh;
@@ -553,67 +551,70 @@ function backToStep1() {
   white-space: nowrap;
   width: 180px;
 }
-.hero-subtitle {
-  margin: 0;
-  opacity: 0.88;
-  font-size: 0.9rem;
-  letter-spacing: 0.01em;
-  max-width: 56rem;
-}
 .main {
   flex: 1;
-  padding: 1.5rem 2rem;
-  max-width: 1400px;
-  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 1rem 1.25rem 1.25rem;
   width: 100%;
+  min-height: 0;
 }
 .main:has(.panel-fullscreen) {
-  max-width: 100%;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0.75rem;
 }
 .panel {
   background: var(--panel);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1.5rem;
+  border-radius: 10px;
+  padding: 1.25rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 .step1-panel {
   padding: 0;
+  overflow: hidden;
 }
 .step1-layout {
   display: grid;
-  grid-template-columns: 1fr minmax(280px, 340px);
-  gap: 1.5rem;
-  align-items: start;
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+  flex: 1;
+  min-height: calc(100vh - 130px);
+  align-items: stretch;
 }
 .step1-form {
   min-width: 0;
-  padding: 1.5rem;
+  padding: 1.25rem 1.5rem;
+  overflow-y: auto;
 }
 .step1-details {
-  padding: 1.25rem 1.5rem;
-  background: color-mix(in srgb, var(--bg) 60%, var(--panel));
+  padding: 1.25rem 1.25rem;
+  background: color-mix(in srgb, var(--bg) 50%, var(--panel));
   border-left: 1px solid var(--border);
-  border-radius: 0 8px 8px 0;
-  position: sticky;
-  top: 1rem;
+  overflow-y: auto;
 }
 .details-title {
-  font-size: 1rem;
-  color: var(--cyan);
-  margin: 0 0 1rem 0;
-}
-.details-section {
-  margin-bottom: 1.25rem;
-}
-.details-heading {
-  font-size: 0.8rem;
+  font-size: 0.85rem;
   font-weight: 700;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
+  color: var(--cyan);
+  margin: 0 0 1rem 0;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border);
+}
+.details-section {
+  margin-bottom: 1rem;
+}
+.details-heading {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
   color: var(--text);
-  opacity: 0.9;
-  margin: 0 0 0.5rem 0;
+  opacity: 0.65;
+  margin: 0 0 0.4rem 0;
 }
 .details-links {
   list-style: none;
@@ -646,15 +647,19 @@ function backToStep1() {
   font-size: 0.8rem;
   word-break: break-all;
 }
+@media (max-width: 1100px) {
+  .topbar-tagline {
+    display: none;
+  }
+}
 @media (max-width: 900px) {
   .step1-layout {
     grid-template-columns: 1fr;
+    min-height: auto;
   }
   .step1-details {
-    position: static;
     border-left: none;
     border-top: 1px solid var(--border);
-    border-radius: 0 0 8px 8px;
   }
 }
 .panel-fullscreen {
@@ -729,21 +734,21 @@ function backToStep1() {
 
 /* Mobile & tablet */
 @media (max-width: 768px) {
-  .hero {
-    padding: 1rem 1rem 1.25rem;
+  .topbar {
+    flex-wrap: wrap;
+    padding: 0.6rem 1rem;
   }
-  .hero-title {
-    font-size: 1.5rem;
+  .topbar-start {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
   }
-  .hero-actions {
+  .topbar-actions {
     width: 100%;
-    justify-content: flex-start;
-  }
-  .hero-subtitle {
-    font-size: 0.85rem;
+    justify-content: flex-end;
   }
   .main {
-    padding: 1rem;
+    padding: 0.75rem;
   }
   .main:has(.panel-fullscreen) {
     padding: 0.5rem 0.75rem;
@@ -782,31 +787,18 @@ function backToStep1() {
 }
 
 @media (max-width: 480px) {
-  .hero {
-    padding: 0.75rem 0.75rem 1rem;
+  .topbar {
+    padding: 0.5rem 0.75rem;
   }
-  .hero-inner {
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.75rem;
+  .topbar-title {
+    font-size: 1rem;
   }
-  .hero-title {
-    font-size: 1.35rem;
-  }
-  .hero-actions {
-    flex-wrap: wrap;
-    gap: 0.4rem;
-  }
-  .hero-link,
-  .theme-toggle {
-    padding: 0.35rem 0.6rem;
-    font-size: 0.8rem;
-  }
-  .hero-subtitle {
-    font-size: 0.8rem;
+  .topbar-btn {
+    padding: 0.3rem 0.5rem;
+    font-size: 0.75rem;
   }
   .main {
-    padding: 0.75rem;
+    padding: 0.5rem;
   }
   .main:has(.panel-fullscreen) {
     padding: 0.35rem 0.5rem;

@@ -140,9 +140,12 @@ function onHashChange() {
 
 <style scoped>
 .docs-viewer {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 1rem 1.5rem 3rem;
+  width: 100%;
+  padding: 0 1.25rem 2rem;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: calc(100vh - 60px);
 }
 .docs-page-header {
   margin-bottom: 1.5rem;
@@ -162,9 +165,10 @@ function onHashChange() {
 }
 .docs-layout {
   display: grid;
-  grid-template-columns: 220px 1fr;
-  gap: 2rem;
+  grid-template-columns: 240px minmax(0, 1fr);
+  gap: 1.25rem;
   align-items: start;
+  flex: 1;
 }
 .docs-nav {
   position: sticky;

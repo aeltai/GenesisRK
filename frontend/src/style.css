@@ -19,9 +19,9 @@
 }
 
 [data-theme="light"] {
-  --bg: #f6f8fa;
+  --bg: #eef1f5;
   --panel: #ffffff;
-  --border: #d0d7de;
+  --border: #d8dee8;
   --text: #1f2328;
   --cyan: #0969da;
   --green: #1a7f37;
