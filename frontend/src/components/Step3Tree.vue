@@ -21,6 +21,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   exportList: [selectedComponentIDs: string[], chartNames: string[], selectedImageRefs: string[]]
+  exportHauler: [selectedComponentIDs: string[], chartNames: string[], selectedImageRefs: string[]]
   back: []
   'update:destinationRegistry': [value: string]
   'update:destinationRegistryUser': [value: string]
@@ -194,6 +195,29 @@ function doExport() {
   }
 
   emit('exportList', componentIDs, chartNames, selectedImageRefs)
+}
+
+function doExportHauler() {
+  const selectedImageRefs = previewImages.value
+  const componentIDs: string[] = []
+  const chartNames = previewCharts.value
+  for (const r of visibleRows.value) {
+    if (!selected[r.node.id]) continue
+    if (r.node.id === 'basic') {
+      const comps = props.components.split(',').map((c) => c.trim()).filter(Boolean)
+      if (props.cniForStandard) componentIDs.push(props.cniForStandard)
+      componentIDs.push('fleet')
+      for (const c of comps) {
+        if (c === 'k3s') componentIDs.push('k3s')
+        else if (c === 'rke2') componentIDs.push('rke2')
+        else if (c === 'rke') componentIDs.push('rke1')
+      }
+    } else if (r.node.id === 'app_collection') {
+      componentIDs.push('app_collection')
+      componentIDs.push('app_collection_containers')
+    }
+  }
+  emit('exportHauler', componentIDs, chartNames, selectedImageRefs)
 }
 
 const availResults = ref<AvailabilityResult>({})
@@ -474,6 +498,7 @@ function toggleReleaseNotes() {
           {{ scanButtonLabel }}
         </button>
         <button type="button" class="btn btn-primary" @click="doExport">Export image list</button>
+        <button type="button" class="btn btn-secondary" @click="doExportHauler">Export Hauler manifest</button>
       </div>
       <div class="destination-registry-section">
         <div class="destination-registry-row">

@@ -3,51 +3,38 @@ version: 2
 before:
   hooks:
     - go mod tidy
+    - go test ./...
 
 builds:
-- id: hangar
-  main: ./main.go
-  env:
-    - CGO_ENABLED=0
-  goos:
-    - linux
-  goarch:
-    - amd64
-    - arm64
-  tags:
-    - containers_image_openpgp
-    - exclude_graphdriver_btrfs
-    - exclude_graphdriver_devicemapper
-  flags:
-    - -buildmode=pie
-  ldflags:
-    - -extldflags -static
-    - -s -w
-    - -X github.com/cnrancher/hangar/pkg/utils.Version={{.Version}}
-    - -X github.com/cnrancher/hangar/pkg/utils.GitCommit={{.ShortCommit}}
-  binary: hangar
-
-release:
-  prerelease: auto
+  - id: genesisrk
+    main: .
+    binary: genesisrk
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/aeltai/hangar-genesis/internal/genesis.Version={{.Version}}
+      - -X github.com/aeltai/hangar-genesis/internal/genesis.HangarVersion=v1.9.4
 
 archives:
-  - formats: [ tar.gz ]
-    wrap_in_directory: true
+  - id: genesisrk
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
     files:
-      - LICENSE
+      - config.example.yaml
       - README.md
-    # this name template makes the OS and Arch compatible with the results of `uname`.
-    name_template: >-
-      {{ .ProjectName }}_
-      {{- title .Os }}_
-      {{- if eq .Arch "amd64" }}x86_64
-      {{- else if eq .Arch "386" }}i386
-      {{- else }}{{ .Arch }}{{ end }}
-      {{- if .Arm }}v{{ .Arm }}{{ end }}
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
 
 changelog:
   sort: asc
-  filters:
-    exclude:
-      - "^docs:"
-      - "^test:"

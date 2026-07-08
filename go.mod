@@ -1,4 +1,4 @@
-module github.com/cnrancher/hangar
+module github.com/aeltai/hangar-genesis
 
 go 1.24.4
 
@@ -13,6 +13,7 @@ require (
 	github.com/aquasecurity/trivy-java-db v0.0.0-20240109071736-184bd7481d48
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
+	github.com/cnrancher/hangar v1.9.4
 	github.com/containers/common v0.64.2
 	github.com/containers/image/v5 v5.36.2
 	github.com/go-git/go-git/v5 v5.16.2
@@ -516,3 +517,5 @@ require (
 	sigs.k8s.io/release-utils v0.12.1 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 )
+
+replace github.com/cnrancher/hangar => ../hangar

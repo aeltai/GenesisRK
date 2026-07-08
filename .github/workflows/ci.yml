@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**']
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout hangar dependency
+        uses: actions/checkout@v4
+        with:
+          repository: cnrancher/hangar
+          ref: v1.9.4
+          path: hangar
+
+      - uses: actions/checkout@v4
+        with:
+          path: hangar-genesis
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build
+        working-directory: hangar-genesis
+        run: go build -o bin/genesisrk .
+
+      - name: Unit tests
+        working-directory: hangar-genesis
+        run: go test ./internal/export/... ./internal/generator/... ./internal/genesis/... -count=1
+
+      - name: Frontend build
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: cd hangar-genesis/frontend && npm ci && npm run build

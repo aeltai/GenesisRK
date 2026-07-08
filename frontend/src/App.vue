@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, watch, onUnmounted } from 'vue'
-import { fetchRancherVersions, fetchStep1OptionsMerged, generate, exportImageList, fetchLogs, type RancherVersionInfo } from './api/genesis'
+import { fetchRancherVersions, fetchStep1OptionsMerged, generate, exportImageList, exportHaulerManifest, fetchLogs, type RancherVersionInfo } from './api/genesis'
 import type { Step1OptionsResponse, GenerateRequest, GenerateResponse } from './types/genesis'
 import Step1Form from './components/Step1Form.vue'
 import Step3Tree from './components/Step3Tree.vue'
@@ -183,6 +183,30 @@ async function runExport(
     const a = document.createElement('a')
     a.href = URL.createObjectURL(blob)
     a.download = 'images.txt'
+    a.click()
+    URL.revokeObjectURL(a.href)
+  } catch (e) {
+    exportError.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+async function runExportHauler(
+  selectedComponentIDs: string[],
+  chartNames: string[],
+  selectedImageRefs: string[]
+) {
+  if (!genResponse.value) return
+  exportError.value = ''
+  try {
+    const blob = await exportHaulerManifest({
+      jobId: genResponse.value.jobId,
+      selectedComponentIDs,
+      chartNames,
+      selectedImageRefs,
+    })
+    const a = document.createElement('a')
+    a.href = URL.createObjectURL(blob)
+    a.download = 'hauler-manifest.yaml'
     a.click()
     URL.revokeObjectURL(a.href)
   } catch (e) {
@@ -388,6 +412,7 @@ function backToStep1() {
           v-model:destination-registry-user="genRequest.destinationRegistryUser"
           v-model:destination-registry-password="genRequest.destinationRegistryPassword"
           @export-list="runExport"
+          @export-hauler="runExportHauler"
           @back="backToStep1"
         />
         <p v-if="exportError" class="error">{{ exportError }}</p>

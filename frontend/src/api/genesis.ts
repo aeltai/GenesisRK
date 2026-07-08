@@ -167,6 +167,19 @@ export async function exportImageList(req: ExportRequest): Promise<Blob> {
   return r.blob()
 }
 
+export async function exportHaulerManifest(req: ExportRequest): Promise<Blob> {
+  const r = await fetch(`${API_BASE}/export/hauler`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  })
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: r.statusText }))
+    throw new Error((err as { error?: string }).error || r.statusText)
+  }
+  return r.blob()
+}
+
 export interface ScanStatusResponse {
   status: 'running' | 'completed' | 'failed'
   error?: string
