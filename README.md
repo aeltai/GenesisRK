@@ -30,7 +30,9 @@ Hangar is a command line utility for container images with the following feature
 
 ## Genesis (interactive generate-list)
 
-**Live UI (Hangar Genesis):** [https://genesis-app.wonderfulsea-dc99daa3.westeurope.azurecontainerapps.io/](https://genesis-app.wonderfulsea-dc99daa3.westeurope.azurecontainerapps.io/) — build image lists in the browser (Rancher version, distros, CNI, charts; export for mirror/save/Hauler).
+**Live UI (GenesisRK):** [https://genesisrk.mftools.xyz](https://genesisrk.mftools.xyz) — build image lists in the browser (Rancher version, distros, CNI, charts; export for mirror/save/Hauler).
+
+**Repository:** [github.com/aeltai/GenesisRK](https://github.com/aeltai/GenesisRK) (standalone project; uses [Hangar](https://github.com/cnrancher/hangar) as a library for mirroring).
 
 The `genesis` command (alias `generate-list-genesis`) generates image lists and Kubernetes version lists for Rancher air-gapped deployments. You can use an interactive TUI, a config file, or both:
 

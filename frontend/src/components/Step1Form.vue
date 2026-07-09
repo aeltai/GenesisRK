@@ -10,6 +10,7 @@ import {
   annotateRancherVersions,
   lifecycleStatusLabel,
   lifecycleStatusTitle,
+  pickLatestOfficialDistroVersion,
 } from '../utils/versionLifecycle'
 
 const props = defineProps<{
@@ -38,8 +39,8 @@ const lbRKE2Traefik = defineModel<boolean>('lbRKE2Traefik', { default: false })
 const includeRC = defineModel<boolean>('includeRC', { default: false })
 const includeGitHubVersions = defineModel<boolean>('includeGitHubVersions', { default: false })
 const includeWindows = defineModel<boolean>('includeWindows', { default: false })
-const k3sVersions = defineModel<string[]>('k3sVersions', { default: () => ['all'] })
-const rke2Versions = defineModel<string[]>('rke2Versions', { default: () => ['all'] })
+const k3sVersions = defineModel<string[]>('k3sVersions', { default: () => [] })
+const rke2Versions = defineModel<string[]>('rke2Versions', { default: () => [] })
 
 // CNI options by distro: K3s default is Flannel; RKE2 defaults to Canal and supports Calico, Cilium, Flannel
 const cniOptions = computed(() => {
@@ -167,14 +168,44 @@ function versionSource(distro: string, v: string): string {
   return cap?.sources?.[v] || 'kdm'
 }
 
+function applyLatestDistroVersion(distro: 'k3s' | 'rke2') {
+  const cap = props.options?.capabilities?.[distro]
+  const pick = pickLatestOfficialDistroVersion(cap?.versions ?? [], cap?.sources)
+  if (!pick) return
+  if (distro === 'k3s') k3sVersions.value = [pick]
+  else rke2Versions.value = [pick]
+}
+
+function toggleDistroAll(distro: 'k3s' | 'rke2') {
+  if (distro === 'k3s') {
+    if (k3sVersions.value.includes('all')) applyLatestDistroVersion('k3s')
+    else k3sVersions.value = ['all']
+    return
+  }
+  if (rke2Versions.value.includes('all')) applyLatestDistroVersion('rke2')
+  else rke2Versions.value = ['all']
+}
+
 function toggleDistro(d: string) {
   const i = distros.value.indexOf(d)
   if (i >= 0) {
     distros.value = distros.value.filter((x) => x !== d)
   } else {
     distros.value = [...distros.value, d]
-    if (d === 'k3s') { lbK3sKlipper.value = true; lbK3sTraefik.value = true }
-    if (d === 'rke2') { lbRKE2Nginx.value = true; lbRKE2Traefik.value = false }
+    if (d === 'k3s') {
+      lbK3sKlipper.value = true
+      lbK3sTraefik.value = true
+      if (!k3sVersions.value.length) {
+        applyLatestDistroVersion('k3s')
+      }
+    }
+    if (d === 'rke2') {
+      lbRKE2Nginx.value = true
+      lbRKE2Traefik.value = false
+      if (!rke2Versions.value.length) {
+        applyLatestDistroVersion('rke2')
+      }
+    }
   }
 }
 
@@ -217,6 +248,20 @@ const rke2VersionAnnotations = computed(() =>
   annotateDistroVersions(props.options?.capabilities?.rke2?.versions ?? [])
 )
 
+watch(
+  () => props.options?.capabilities,
+  (caps) => {
+    if (!caps) return
+    if (distros.value.includes('k3s') && !k3sVersions.value.length) {
+      applyLatestDistroVersion('k3s')
+    }
+    if (distros.value.includes('rke2') && !rke2Versions.value.length) {
+      applyLatestDistroVersion('rke2')
+    }
+  },
+  { immediate: true }
+)
+
 onMounted(() => {
   document.addEventListener('click', closeRancherDropdown)
 })
@@ -232,6 +277,12 @@ onUnmounted(() => {
     <div class="field rancher-version-field">
       <label>Rancher version(s)</label>
       <p class="field-hint">Select one or more; the image list will include images for all selected versions.</p>
+      <div class="version-legend rancher-version-legend">
+        <span class="version-legend-item"><span class="lifecycle-badge badge-current">Current</span> newest minor</span>
+        <span class="version-legend-item"><span class="lifecycle-badge badge-latest">Latest patch</span> highest patch</span>
+        <span class="version-legend-item"><span class="lifecycle-badge badge-eom">EOM</span> maintenance only</span>
+        <span class="version-legend-item"><span class="lifecycle-badge badge-eol">EOL</span> end of life</span>
+      </div>
       <template v-if="availableRancherVersions?.length > 0">
         <div class="rancher-version-dropdown">
           <button
@@ -249,6 +300,7 @@ onUnmounted(() => {
                 v-for="rv in rancherVersionAnnotations"
                 :key="rv.version"
                 class="rancher-version-option"
+                :class="{ 'option-eol': rv.status === 'eol' }"
                 :title="lifecycleStatusTitle(rv)"
               >
                 <input
@@ -259,6 +311,8 @@ onUnmounted(() => {
                 <span class="option-version">{{ rv.version }}</span>
                 <span v-if="rv.isCurrentMinor" class="lifecycle-badge badge-current">Current</span>
                 <span v-else-if="rv.isLatestPatch" class="lifecycle-badge badge-latest">Latest patch</span>
+                <span v-if="rv.status === 'maintenance'" class="lifecycle-badge badge-eom">{{ lifecycleStatusLabel(rv.status) }}</span>
+                <span v-if="rv.status === 'eol'" class="lifecycle-badge badge-eol">{{ lifecycleStatusLabel(rv.status) }}</span>
                 <span v-if="rv.releaseDate" class="option-date">{{ rv.releaseDate }}</span>
                 <a
                   :href="rancherRelease(rv.version)"
@@ -357,7 +411,7 @@ onUnmounted(() => {
         <div class="version-header">
           <span class="version-label">K3s</span>
           <label class="check version-all">
-            <input type="checkbox" :checked="k3sVersions.includes('all')" @change="k3sVersions = k3sVersions.includes('all') ? [] : ['all']" />
+            <input type="checkbox" :checked="k3sVersions.includes('all')" @change="toggleDistroAll('k3s')" />
             All
           </label>
         </div>
@@ -389,7 +443,7 @@ onUnmounted(() => {
         <div class="version-header">
           <span class="version-label">RKE2</span>
           <label class="check version-all">
-            <input type="checkbox" :checked="rke2Versions.includes('all')" @change="rke2Versions = rke2Versions.includes('all') ? [] : ['all']" />
+            <input type="checkbox" :checked="rke2Versions.includes('all')" @change="toggleDistroAll('rke2')" />
             All
           </label>
         </div>
@@ -663,6 +717,12 @@ onUnmounted(() => {
 }
 .option-release-link:hover {
   opacity: 1;
+}
+.rancher-version-legend {
+  margin: 0.35rem 0 0.5rem;
+}
+.rancher-version-option.option-eol {
+  opacity: 0.75;
 }
 .cni-field,
 .lb-field,

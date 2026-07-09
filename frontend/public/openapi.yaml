@@ -1,0 +1,308 @@
+openapi: 3.0.3
+info:
+  title: GenesisRK REST API
+  description: |
+    HTTP API for the GenesisRK web UI and automation. Start with `hangar genesis serve`
+    (or the `genesisrk` binary from Hangar-Genesis).
+  version: 1.0.0
+servers:
+  - url: /
+    description: Current host (use this origin when testing from the docs UI)
+tags:
+  - name: read
+    description: Read-only metadata
+  - name: generate
+    description: Build image trees and export lists
+  - name: scan
+    description: Trivy vulnerability scans
+paths:
+  /api/rancher-versions:
+    get:
+      tags: [read]
+      summary: List Rancher release versions
+      parameters:
+        - name: includeRC
+          in: query
+          schema:
+            type: boolean
+            default: false
+          description: Include alpha/beta/rc pre-releases
+      responses:
+        '200':
+          description: Version list from GitHub releases
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        version:
+                          type: string
+                          example: v2.14.3
+                        date:
+                          type: string
+                          example: "2026-06-29"
+  /api/step1-options:
+    get:
+      tags: [read]
+      summary: Step 1 capabilities (K3s/RKE2/RKE versions)
+      parameters:
+        - name: rancher
+          in: query
+          required: true
+          schema:
+            type: string
+          example: v2.14.3
+        - name: includeRC
+          in: query
+          schema:
+            type: boolean
+        - name: includeGitHubVersions
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Distro version capabilities from KDM (+ optional GitHub)
+  /api/generate:
+    post:
+      tags: [generate]
+      summary: Build component tree (returns jobId)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateRequest'
+            example:
+              rancherVersion: v2.14.3
+              rancherVersions: [v2.14.3]
+              distros: [rke2]
+              cni: cni_calico
+              loadBalancer: true
+              lbRKE2Nginx: true
+              rke2Versions: all
+      responses:
+        '200':
+          description: Tree and job ID (valid ~60 minutes)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateResponse'
+  /api/export:
+    post:
+      tags: [generate]
+      summary: Export images.txt for a job
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportRequest'
+      responses:
+        '200':
+          description: Plain-text image list
+          content:
+            text/plain:
+              schema:
+                type: string
+  /api/check-availability:
+    post:
+      tags: [generate]
+      summary: Check registry reachability and pull size
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [images]
+              properties:
+                images:
+                  type: array
+                  items:
+                    type: string
+                  example:
+                    - docker.io/rancher/rancher:v2.14.3
+      responses:
+        '200':
+          description: Per-image status map
+  /api/scan:
+    post:
+      tags: [scan]
+      summary: Start async Trivy scan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [images]
+              properties:
+                images:
+                  type: array
+                  maxItems: 50
+                  items:
+                    type: string
+      responses:
+        '200':
+          description: Scan job ID
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  scanJobId:
+                    type: string
+  /api/scan/status/{id}:
+    get:
+      tags: [scan]
+      summary: Poll scan status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Scan progress and summary
+  /api/scan/report/{id}:
+    get:
+      tags: [scan]
+      summary: Download scan CSV report
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CSV report
+          content:
+            text/csv:
+              schema:
+                type: string
+  /api/release-notes:
+    get:
+      tags: [read]
+      summary: GitHub release notes and chart versions
+      parameters:
+        - name: repo
+          in: query
+          required: true
+          schema:
+            type: string
+          example: rancher/rancher
+        - name: tag
+          in: query
+          required: true
+          schema:
+            type: string
+          example: v2.14.3
+      responses:
+        '200':
+          description: Release metadata
+  /api/logs:
+    get:
+      tags: [read]
+      summary: Recent server log lines
+      responses:
+        '200':
+          description: Log buffer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items:
+                      type: string
+components:
+  schemas:
+    GenerateRequest:
+      type: object
+      properties:
+        rancherVersion:
+          type: string
+        rancherVersions:
+          type: array
+          items:
+            type: string
+        isRPMGC:
+          type: boolean
+        includeAppCollectionCharts:
+          type: boolean
+        distros:
+          type: array
+          items:
+            type: string
+            enum: [k3s, rke2, rke]
+        cni:
+          type: string
+        loadBalancer:
+          type: boolean
+        lbK3sKlipper:
+          type: boolean
+        lbK3sTraefik:
+          type: boolean
+        lbRKE2Nginx:
+          type: boolean
+        lbRKE2Traefik:
+          type: boolean
+        includeWindows:
+          type: boolean
+        k3sVersions:
+          type: string
+        rke2Versions:
+          type: string
+        rkeVersions:
+          type: string
+    GenerateResponse:
+      type: object
+      properties:
+        jobId:
+          type: string
+        roots:
+          type: array
+          items:
+            type: object
+        basicCharts:
+          type: array
+          items:
+            type: object
+        basicImageComponent:
+          type: object
+          additionalProperties:
+            type: string
+        pastSelection:
+          type: string
+    ExportRequest:
+      type: object
+      required: [jobId]
+      properties:
+        jobId:
+          type: string
+        selectedComponentIDs:
+          type: array
+          items:
+            type: string
+        chartNames:
+          type: array
+          items:
+            type: string
+        selectedImageRefs:
+          type: array
+          items:
+            type: string
+    Error:
+      type: object
+      properties:
+        error:
+          type: string

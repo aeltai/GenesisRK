@@ -27,6 +27,65 @@ import (
 
 const genesisJobExpiry = 60 * time.Minute
 
+const (
+	rancherVersionsCacheTTL = 15 * time.Minute
+	step1OptionsCacheTTL    = 20 * time.Minute
+)
+
+type cacheEntry struct {
+	body      []byte
+	expiresAt time.Time
+}
+
+type responseCache struct {
+	mu      sync.RWMutex
+	entries map[string]cacheEntry
+}
+
+func newResponseCache() *responseCache {
+	return &responseCache{entries: make(map[string]cacheEntry)}
+}
+
+func (c *responseCache) get(key string) ([]byte, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	e, ok := c.entries[key]
+	if !ok || time.Now().After(e.expiresAt) {
+		return nil, false
+	}
+	return e.body, true
+}
+
+func (c *responseCache) set(key string, body []byte, ttl time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.entries[key] = cacheEntry{body: body, expiresAt: time.Now().Add(ttl)}
+}
+
+var genesisAPICache = newResponseCache()
+
+func writeCachedJSON(w http.ResponseWriter, body []byte, maxAge time.Duration) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", int(maxAge.Seconds())))
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(body)
+}
+
+func staticCacheControl(path string) string {
+	if path == "/" || path == "/index.html" {
+		return "no-cache, no-store, must-revalidate"
+	}
+	if strings.HasPrefix(path, "/assets/") {
+		return "public, max-age=31536000, immutable"
+	}
+	if strings.HasPrefix(path, "/docs/") || path == "/openapi.yaml" || path == "/favicon.svg" ||
+		path == "/genesisrk-logo.png" || path == "/favicon.png" || path == "/apple-touch-icon.png" ||
+		strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".gif") {
+		return "public, max-age=86400"
+	}
+	return "public, max-age=3600"
+}
+
 //go:embed genesis_openapi.yaml
 var genesisOpenAPISpec []byte
 
@@ -262,7 +321,7 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
@@ -299,13 +358,12 @@ func newGenesisServeCmd(parent *genesisCmd) {
 			mux.HandleFunc("/api/release-notes", handleReleaseNotes)
 			mux.HandleFunc("/api/logs", handleLogs)
 			mux.HandleFunc("/api/openapi.yaml", handleOpenAPISpec)
+			mux.HandleFunc("/api/openapi", handleOpenAPISpec)
 			mux.HandleFunc("/api/docs", handleSwaggerUI)
 			if staticDir != "" {
 				fs := http.FileServer(http.Dir(staticDir))
 				mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-					if r.URL.Path == "/" || r.URL.Path == "/index.html" {
-						w.Header().Set("Cache-Control", "no-cache, no-store, must-revalidate")
-					}
+					w.Header().Set("Cache-Control", staticCacheControl(r.URL.Path))
 					fs.ServeHTTP(w, r)
 				})
 			}
@@ -327,6 +385,12 @@ type githubTag struct {
 func handleRancherVersions(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	includeRC := r.URL.Query().Get("includeRC") == "true"
+	cacheKey := fmt.Sprintf("rancher-versions:rc=%t", includeRC)
+	if body, ok := genesisAPICache.get(cacheKey); ok {
+		writeCachedJSON(w, body, rancherVersionsCacheTTL)
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
@@ -362,7 +426,6 @@ func handleRancherVersions(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, "decode: "+err.Error())
 		return
 	}
-	includeRC := r.URL.Query().Get("includeRC") == "true"
 	type versionInfo struct {
 		Version string `json:"version"`
 		Date    string `json:"date"`
@@ -388,7 +451,13 @@ func handleRancherVersions(w http.ResponseWriter, r *http.Request) {
 		versions = append(versions, versionInfo{Version: name, Date: date})
 	}
 	sort.Slice(versions, func(i, j int) bool { return semver.Compare(versions[i].Version, versions[j].Version) > 0 })
-	writeJSON(w, http.StatusOK, map[string]interface{}{"versions": versions})
+	body, err := json.Marshal(map[string]interface{}{"versions": versions})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "encode: "+err.Error())
+		return
+	}
+	genesisAPICache.set(cacheKey, body, rancherVersionsCacheTTL)
+	writeCachedJSON(w, body, rancherVersionsCacheTTL)
 }
 
 func handleLogs(w http.ResponseWriter, r *http.Request) {
@@ -401,22 +470,31 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeErr(w, http.StatusMethodNotAllowed, "GET only")
 		return
 	}
 	w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
 	w.Header().Set("Cache-Control", "public, max-age=300")
+	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(genesisOpenAPISpec)))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(genesisOpenAPISpec)
 }
 
 func handleSwaggerUI(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
+	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		writeErr(w, http.StatusMethodNotAllowed, "GET only")
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if r.Method == http.MethodHead {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write([]byte(genesisSwaggerHTML))
 }
@@ -431,8 +509,15 @@ func handleStep1Options(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "rancher query parameter required")
 		return
 	}
+	includeRC := r.URL.Query().Get("includeRC") == "true"
+	includeGitHubVersions := r.URL.Query().Get("includeGitHubVersions") == "true"
 	if !strings.HasPrefix(rancherVersion, "v") {
 		rancherVersion = "v" + rancherVersion
+	}
+	cacheKey := fmt.Sprintf("step1-options:%s:rc=%t:gh=%t", rancherVersion, includeRC, includeGitHubVersions)
+	if body, ok := genesisAPICache.get(cacheKey); ok {
+		writeCachedJSON(w, body, step1OptionsCacheTTL)
+		return
 	}
 	cc := &genesisCmd{genesisOpts: &genesisOpts{
 		rancherVersion:      rancherVersion,
@@ -481,17 +566,22 @@ func handleStep1Options(w http.ResponseWriter, r *http.Request) {
 		KDMURL:          GetKDMURLForDisplay(cc.rancherVersion, cc.isRPMGC, cc.genesisOpts.dev),
 		ImageListSource: GetImageListSourceForDisplay(cc.isRPMGC),
 	}
-	includeRC := r.URL.Query().Get("includeRC") == "true"
-	includeGitHubVersions := r.URL.Query().Get("includeGitHubVersions") == "true"
 	if includeGitHubVersions {
 		mergeGitHubVersions(r.Context(), capJSON, includeRC)
 	}
 
-	writeJSON(w, http.StatusOK, Step1OptionsResponse{
+	resp := Step1OptionsResponse{
 		HasRKE1:      hasRKE1,
 		Capabilities: capJSON,
 		Details:      details,
-	})
+	}
+	body, err := json.Marshal(resp)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "encode: "+err.Error())
+		return
+	}
+	genesisAPICache.set(cacheKey, body, step1OptionsCacheTTL)
+	writeCachedJSON(w, body, step1OptionsCacheTTL)
 }
 
 // githubRelease is a minimal struct for GitHub releases API.

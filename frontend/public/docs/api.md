@@ -6,7 +6,7 @@ Start the server:
 # From the Hangar repo (this project)
 hangar genesis serve --port=8080 --static=frontend/dist
 
-# Or from Hangar-Genesis standalone build
+# Or build the GenesisRK binary from this repo (hangar genesis serve)
 genesisrk serve --port=8080 --static=frontend/dist
 ```
 

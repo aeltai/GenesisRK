@@ -14,6 +14,18 @@ const K8S_MINOR_LIFECYCLE: Record<string, { eom: string; eol: string }> = {
   '1.25': { eom: '2023-08-28', eol: '2023-10-28' },
 }
 
+/** SUSE Rancher Manager minor lifecycle (general support ≈ EOM, end of maintenance = EOL). */
+const RANCHER_MINOR_LIFECYCLE: Record<string, { eom: string; eol: string }> = {
+  '2.14': { eom: '2027-06-30', eol: '2027-12-31' },
+  '2.13': { eom: '2027-03-31', eol: '2027-09-30' },
+  '2.12': { eom: '2026-12-31', eol: '2027-06-30' },
+  '2.11': { eom: '2026-06-30', eol: '2026-12-31' },
+  '2.10': { eom: '2025-06-30', eol: '2025-12-31' },
+  '2.9': { eom: '2025-03-31', eol: '2025-09-30' },
+  '2.8': { eom: '2024-12-31', eol: '2025-06-30' },
+  '2.7': { eom: '2024-06-30', eol: '2024-12-31' },
+}
+
 export type VersionLifecycleStatus = 'supported' | 'maintenance' | 'eol' | 'unknown'
 
 export interface VersionAnnotation {
@@ -89,6 +101,20 @@ function k8sLifecycleStatus(minor: string, now = new Date()): {
   return { status: 'supported', eom: row.eom, eol: row.eol }
 }
 
+function rancherLifecycleStatus(minor: string, now = new Date()): {
+  status: VersionLifecycleStatus
+  eom?: string
+  eol?: string
+} {
+  const row = RANCHER_MINOR_LIFECYCLE[minor]
+  if (!row) return { status: 'unknown' }
+  const eom = parseIsoDate(row.eom)
+  const eol = parseIsoDate(row.eol)
+  if (now > eol) return { status: 'eol', eom: row.eom, eol: row.eol }
+  if (now > eom) return { status: 'maintenance', eom: row.eom, eol: row.eol }
+  return { status: 'supported', eom: row.eom, eol: row.eol }
+}
+
 function latestPatchByMinor(versions: string[]): Map<string, string> {
   const map = new Map<string, string>()
   for (const v of versions) {
@@ -155,7 +181,7 @@ export function annotateDistroVersions(versions: string[]): VersionAnnotation[] 
   })
 }
 
-/** Annotate Rancher Manager releases (latest patch / current minor; dates from GitHub). */
+/** Annotate Rancher Manager releases (latest patch / current minor; SUSE lifecycle dates). */
 export function annotateRancherVersions(
   releases: { version: string; date?: string }[]
 ): VersionAnnotation[] {
@@ -166,14 +192,43 @@ export function annotateRancherVersions(
     const minor = extractRancherMinor(version)
     const isLatestPatch = minor ? latestByMinor.get(minor) === version : false
     const isCurrentMinor = !!(minor && currentMinor === minor && isLatestPatch)
+    const lifecycle = minor ? rancherLifecycleStatus(minor) : { status: 'unknown' as const }
     return {
       version,
       releaseDate: date,
-      status: 'unknown' as VersionLifecycleStatus,
+      status: lifecycle.status,
+      eom: lifecycle.eom,
+      eol: lifecycle.eol,
       isLatestPatch,
       isCurrentMinor,
     }
   })
+}
+
+/** Pick the newest KDM-supported patch (current minor line, official catalog). */
+export function pickLatestOfficialDistroVersion(
+  versions: string[],
+  sources?: Record<string, string>
+): string | null {
+  if (!versions.length) return null
+  const kdmOnly = sources
+    ? versions.filter((v) => {
+        const src = sources[v]?.toLowerCase()
+        return src === 'kdm' || src === 'both'
+      })
+    : versions
+  const pool = kdmOnly.length
+    ? kdmOnly
+    : versions.filter((v) => {
+        const src = sources?.[v]?.toLowerCase()
+        return src !== 'github' && !/[-+]rc/i.test(v)
+      })
+  const candidates = pool.length ? pool : versions
+  const annotated = annotateDistroVersions(candidates)
+  const current = annotated.find((a) => a.isCurrentMinor)
+  if (current) return current.version
+  const sorted = [...annotated].sort((a, b) => compareVersionTags(b.version, a.version))
+  return sorted[0]?.version ?? null
 }
 
 export function lifecycleStatusLabel(status: VersionLifecycleStatus): string {
@@ -191,11 +246,14 @@ export function lifecycleStatusLabel(status: VersionLifecycleStatus): string {
 
 export function lifecycleStatusTitle(ann: VersionAnnotation): string {
   const parts: string[] = []
-  if (ann.isCurrentMinor) parts.push('Newest Kubernetes minor line in this list')
+  if (ann.isCurrentMinor) parts.push('Newest minor line in this list')
   else if (ann.isLatestPatch) parts.push('Latest patch for this minor release')
   if (ann.kubernetesMinor && ann.eom && ann.eol) {
     parts.push(`Active support ends ${ann.eom} (EOM)`)
     parts.push(`End of life ${ann.eol} (EOL)`)
+  } else if (!ann.kubernetesMinor && ann.eom && ann.eol) {
+    parts.push(`General support ends ${ann.eom} (EOM)`)
+    parts.push(`End of maintenance ${ann.eol} (EOL)`)
   }
   if (ann.releaseDate) parts.push(`Released ${ann.releaseDate}`)
   return parts.join(' · ')

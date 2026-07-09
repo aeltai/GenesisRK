@@ -83,8 +83,8 @@ const genRequest = reactive<GenerateRequest>({
   lbRKE2Nginx: true,
   lbRKE2Traefik: false,
   includeWindows: false,
-  k3sVersions: ['all'],
-  rke2Versions: ['all'],
+  k3sVersions: [],
+  rke2Versions: [],
   destinationRegistry: '',
 })
 
@@ -255,11 +255,14 @@ function backToStep1() {
     <header class="hero">
       <div class="hero-inner">
         <a href="#" class="hero-brand" @click.prevent="goBackToApp">
-          <h1 class="hero-title">GenesisRK</h1>
+          <h1 class="hero-brand-lockup">
+            <img src="/genesisrk-logo.png" alt="GenesisRK" class="hero-logo" width="416" height="427" />
+          </h1>
           <span class="hero-version">v{{ VERSION }}</span>
+          <span class="hero-name">GenesisRK</span>
         </a>
         <div class="hero-actions">
-          <a href="https://github.com/aeltai/hangar-genesis" target="_blank" rel="noopener noreferrer" class="hero-link" title="GitHub Repository">
+          <a href="https://github.com/aeltai/GenesisRK" target="_blank" rel="noopener noreferrer" class="hero-link" title="GitHub Repository">
             <svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
             GitHub
           </a>
@@ -439,6 +442,10 @@ function backToStep1() {
     </main>
 
     <footer class="footer">
+      <a href="#" class="footer-brand" title="GenesisRK home" @click.prevent="goBackToApp">
+        <img src="/genesisrk-logo.png" alt="GenesisRK" class="footer-logo" width="416" height="427" />
+      </a>
+      <span class="footer-sep">·</span>
       <a href="https://github.com/cnrancher/hangar" target="_blank" rel="noopener noreferrer">Hangar</a>
       <span class="footer-sep">·</span>
       <a href="https://ranchermanager.docs.rancher.com/" target="_blank" rel="noopener noreferrer">Rancher Manager docs</a>
@@ -481,8 +488,33 @@ function backToStep1() {
   text-decoration: none;
   color: inherit;
 }
-.hero-brand:hover .hero-title {
+.hero-brand:hover .hero-name {
   color: var(--accent);
+}
+.hero-brand-lockup {
+  display: flex;
+  align-items: center;
+  margin: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: 1;
+}
+.hero-name {
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  transition: color 0.15s;
+}
+.hero-logo {
+  height: 2.15rem;
+  width: auto;
+  display: block;
+  object-fit: contain;
+}
+:root:not([data-theme="light"]) .hero-logo,
+:root:not([data-theme="light"]) .footer-logo {
+  filter: brightness(1.18) contrast(1.05);
 }
 .hero-title {
   transition: color 0.15s;
@@ -562,10 +594,16 @@ function backToStep1() {
   color: var(--text);
 }
 .docs-panel {
-  max-width: 900px;
   margin: 0;
   padding: 0;
   flex: 1;
+  width: 100%;
+  max-width: none;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  overflow: hidden;
+  min-height: calc(100vh - 108px - var(--footer-h));
 }
 .docs-body {
   background: var(--panel);
@@ -635,8 +673,16 @@ function backToStep1() {
 }
 .main:has(.panel-fullscreen),
 .main:has(.docs-panel) {
-  padding-left: 1rem;
-  padding-right: 1rem;
+  padding-left: 0.75rem;
+  padding-right: 0.75rem;
+  max-width: none;
+}
+
+@media (min-width: 1440px) {
+  .main:has(.docs-panel) {
+    padding-left: 0;
+    padding-right: 0;
+  }
 }
 .panel {
   background: var(--panel);
@@ -653,12 +699,6 @@ function backToStep1() {
   overflow: hidden;
   width: 100%;
   align-self: stretch;
-}
-.docs-panel {
-  padding: 0;
-  overflow: hidden;
-  flex: 1;
-  min-height: calc(100vh - 108px - var(--footer-h));
 }
 .details-section-docs {
   margin-top: 0.5rem;
@@ -832,6 +872,19 @@ function backToStep1() {
   text-align: center;
   color: var(--text-muted);
 }
+.footer-brand {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+  color: inherit;
+  margin-right: 0.15rem;
+}
+.footer-logo {
+  height: 1.4rem;
+  width: auto;
+  display: block;
+  object-fit: contain;
+}
 .footer a {
   color: var(--accent);
   text-decoration: none;
@@ -854,6 +907,12 @@ function backToStep1() {
   }
   .hero-title {
     font-size: 1rem;
+  }
+  .hero-name {
+    font-size: 0.75rem;
+  }
+  .hero-logo {
+    height: 1.85rem;
   }
   .hero-actions {
     margin-left: auto;
@@ -910,6 +969,15 @@ function backToStep1() {
   }
   .hero-title {
     font-size: 0.9375rem;
+  }
+  .hero-name {
+    font-size: 0.6875rem;
+  }
+  .hero-logo {
+    height: 1.55rem;
+  }
+  .footer-logo {
+    height: 1.1rem;
   }
   .hero-actions {
     gap: 0.25rem;

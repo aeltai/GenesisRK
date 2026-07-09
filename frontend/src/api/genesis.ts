@@ -7,24 +7,72 @@ import type {
 
 const API_BASE = '/api'
 
+const CACHE_PREFIX = 'genesis-api:'
+const RANCHER_VERSIONS_TTL_MS = 15 * 60 * 1000
+const STEP1_OPTIONS_TTL_MS = 10 * 60 * 1000
+
+type CacheEnvelope<T> = { at: number; data: T }
+
+function cacheGet<T>(key: string, ttlMs: number): T | null {
+  try {
+    const raw = sessionStorage.getItem(CACHE_PREFIX + key)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as CacheEnvelope<T>
+    if (Date.now() - parsed.at > ttlMs) return null
+    return parsed.data
+  } catch {
+    return null
+  }
+}
+
+function cacheSet<T>(key: string, data: T) {
+  try {
+    sessionStorage.setItem(CACHE_PREFIX + key, JSON.stringify({ at: Date.now(), data }))
+  } catch {
+    /* quota or private mode */
+  }
+}
+
+const inflight = new Map<string, Promise<unknown>>()
+
+async function fetchCached<T>(key: string, ttlMs: number, fetcher: () => Promise<T>): Promise<T> {
+  const hit = cacheGet<T>(key, ttlMs)
+  if (hit !== null) return hit
+  const pending = inflight.get(key) as Promise<T> | undefined
+  if (pending) return pending
+  const p = fetcher().then((data) => {
+    cacheSet(key, data)
+    inflight.delete(key)
+    return data
+  }).catch((err) => {
+    inflight.delete(key)
+    throw err
+  })
+  inflight.set(key, p)
+  return p
+}
+
 export interface RancherVersionInfo {
   version: string
   date: string
 }
 
 export async function fetchRancherVersions(includeRC = false): Promise<RancherVersionInfo[]> {
-  const rc = includeRC ? '?includeRC=true' : ''
-  const r = await fetch(`${API_BASE}/rancher-versions${rc}`)
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({ error: r.statusText }))
-    throw new Error((err as { error?: string }).error || r.statusText)
-  }
-  const data = await r.json() as { versions: RancherVersionInfo[] | string[] }
-  if (!data.versions?.length) return []
-  if (typeof data.versions[0] === 'string') {
-    return (data.versions as string[]).map(v => ({ version: v, date: '' }))
-  }
-  return data.versions as RancherVersionInfo[]
+  const cacheKey = `rancher-versions:rc=${includeRC}`
+  return fetchCached(cacheKey, RANCHER_VERSIONS_TTL_MS, async () => {
+    const rc = includeRC ? '?includeRC=true' : ''
+    const r = await fetch(`${API_BASE}/rancher-versions${rc}`)
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: r.statusText }))
+      throw new Error((err as { error?: string }).error || r.statusText)
+    }
+    const data = await r.json() as { versions: RancherVersionInfo[] | string[] }
+    if (!data.versions?.length) return []
+    if (typeof data.versions[0] === 'string') {
+      return (data.versions as string[]).map(v => ({ version: v, date: '' }))
+    }
+    return data.versions as RancherVersionInfo[]
+  })
 }
 
 export async function fetchStep1Options(
@@ -32,15 +80,18 @@ export async function fetchStep1Options(
   includeRC = false,
   includeGitHubVersions = false
 ): Promise<Step1OptionsResponse> {
-  const v = encodeURIComponent(rancherVersion)
-  const rc = includeRC ? '&includeRC=true' : ''
-  const gh = includeGitHubVersions ? '&includeGitHubVersions=true' : ''
-  const r = await fetch(`${API_BASE}/step1-options?rancher=${v}${rc}${gh}`)
-  if (!r.ok) {
-    const err = await r.json().catch(() => ({ error: r.statusText }))
-    throw new Error((err as { error?: string }).error || r.statusText)
-  }
-  return r.json()
+  const cacheKey = `step1:${rancherVersion}:rc=${includeRC}:gh=${includeGitHubVersions}`
+  return fetchCached(cacheKey, STEP1_OPTIONS_TTL_MS, async () => {
+    const v = encodeURIComponent(rancherVersion)
+    const rc = includeRC ? '&includeRC=true' : ''
+    const gh = includeGitHubVersions ? '&includeGitHubVersions=true' : ''
+    const r = await fetch(`${API_BASE}/step1-options?rancher=${v}${rc}${gh}`)
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: r.statusText }))
+      throw new Error((err as { error?: string }).error || r.statusText)
+    }
+    return r.json()
+  })
 }
 
 export async function generate(req: GenerateRequest): Promise<GenerateResponse> {

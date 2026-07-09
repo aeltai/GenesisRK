@@ -196,7 +196,7 @@ See generate-list-config.example.yaml for config file format.`,
 			fmt.Println("  • Output: combined image list, per-distro lists, versions file; optional scan.")
 			fmt.Println("  Coming: generic Helm and OCI chart integrations into image-list.")
 			fmt.Println()
-			fmt.Println("Author: ala.eltai@suse.com et AI| Forked from https://github.com/cnrancher/hangar | Original hangar author: StarryWang")
+			fmt.Println("Author: ala.eltai@suse.com | GenesisRK https://github.com/aeltai/GenesisRK | Based on https://github.com/cnrancher/hangar (StarryWang)")
 			fmt.Print("\033[0m") // Reset color
 			fmt.Println()
 			fmt.Println("\033[2mTo exit at any time: press Control+C (Mac: the Control key, not Command). Or press q in prompts.\033[0m")

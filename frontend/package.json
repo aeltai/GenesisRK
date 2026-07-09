@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "sync-docs": "mkdir -p public/docs/assets && (cp ../hangar-genesis/docs/*.md public/docs/ 2>/dev/null || cp ../docs/*.md public/docs/ 2>/dev/null || true) && (cp ../hangar-genesis/docs/assets/*.gif public/docs/assets/ 2>/dev/null || true)",
+    "sync-docs": "mkdir -p public/docs/assets && (cp ../docs/*.md public/docs/ 2>/dev/null || true) && (cp ../docs/assets/*.gif public/docs/assets/ 2>/dev/null || true) && cp ../pkg/commands/genesis_openapi.yaml public/openapi.yaml 2>/dev/null || true",
     "dev": "npm run sync-docs && vite",
     "build": "npm run sync-docs && vue-tsc -b && vite build",
     "preview": "vite preview"

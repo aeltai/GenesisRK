@@ -5,10 +5,10 @@
 **From source** (requires [Hangar](https://github.com/cnrancher/hangar) `v1.9.4` as a sibling directory):
 
 ```bash
-git clone https://github.com/aeltai/Hangar-Genesis.git
+git clone https://github.com/aeltai/GenesisRK.git
 git clone https://github.com/cnrancher/hangar.git ../hangar
 cd ../hangar && git checkout v1.9.4
-cd ../Hangar-Genesis
+cd ../GenesisRK
 go build -o bin/genesisrk .
 ```
 

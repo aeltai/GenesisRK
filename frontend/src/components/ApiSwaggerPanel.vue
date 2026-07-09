@@ -44,6 +44,18 @@ function loadScript(src: string): Promise<void> {
   })
 }
 
+async function resolveOpenApiUrl(): Promise<string> {
+  for (const url of ['/openapi.yaml', '/api/openapi.yaml', '/api/openapi']) {
+    try {
+      const r = await fetch(url, { method: 'HEAD' })
+      if (r.ok) return url
+    } catch {
+      /* try next */
+    }
+  }
+  return '/openapi.yaml'
+}
+
 onMounted(async () => {
   if (!host.value || swaggerLoaded) return
   try {
@@ -51,8 +63,9 @@ onMounted(async () => {
     await loadStylesheet(`https://unpkg.com/swagger-ui-dist@${ver}/swagger-ui.css`)
     await loadScript(`https://unpkg.com/swagger-ui-dist@${ver}/swagger-ui-bundle.js`)
     if (!window.SwaggerUIBundle || !host.value) return
+    const specUrl = await resolveOpenApiUrl()
     window.SwaggerUIBundle({
-      url: '/api/openapi.yaml',
+      url: specUrl,
       dom_id: '#swagger-ui-host',
       deepLinking: true,
       presets: [window.SwaggerUIBundle.presets.apis],
@@ -119,7 +132,13 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
 }
 .swagger-ui-host {
-  min-height: 480px;
+  min-height: 420px;
+}
+
+@media (min-width: 1440px) {
+  .swagger-ui-host {
+    min-height: calc(100vh - 220px - var(--footer-h));
+  }
 }
 .swagger-ui-host :deep(.swagger-ui) {
   font-family: var(--font-sans);
