@@ -335,16 +335,16 @@ onUnmounted(() => {
         class="input"
       />
       <LoadingShapes v-if="optionsLoading" size="sm" class="options-loader" />
+      <label class="check rc-toggle">
+        <input v-model="includeGitHubVersions" type="checkbox" />
+        Include versions from GitHub (K3s/RKE2 release tags; shows newer than KDM)
+      </label>
+      <label v-if="includeGitHubVersions" class="check rc-toggle">
+        <input v-model="includeRC" type="checkbox" />
+        Include pre-release (RC/alpha/beta) versions from GitHub
+      </label>
+      <p v-if="loadError" class="error-msg">{{ loadError }}</p>
     </div>
-    <label class="check rc-toggle">
-      <input v-model="includeGitHubVersions" type="checkbox" />
-      Include versions from GitHub (K3s/RKE2 release tags; shows newer than KDM)
-    </label>
-    <label v-if="includeGitHubVersions" class="check rc-toggle">
-      <input v-model="includeRC" type="checkbox" />
-      Include pre-release (RC/alpha/beta) versions from GitHub
-    </label>
-    <p v-if="loadError" class="error-msg">{{ loadError }}</p>
 
     <div class="field source-field">
       <label class="label-with-icon">
@@ -984,10 +984,16 @@ onUnmounted(() => {
   flex-direction: column;
   align-items: flex-start;
 }
-.rc-toggle {
-  margin: -0.25rem 0 0 140px;
+.rancher-version-field .rc-toggle {
+  margin: 0.15rem 0 0;
+  align-self: flex-start;
+  max-width: 100%;
   font-size: 0.85rem;
   opacity: 0.85;
+}
+.rancher-version-field .error-msg {
+  margin: 0.15rem 0 0;
+  align-self: flex-start;
 }
 .loading-indicator,
 .options-loader {
@@ -1220,9 +1226,6 @@ onUnmounted(() => {
     width: 100%;
     max-width: 280px;
     min-width: 0;
-  }
-  .rc-toggle {
-    margin-left: 0;
   }
   .rancher-version-dropdown {
     max-width: 100%;
