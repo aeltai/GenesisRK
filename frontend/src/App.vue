@@ -1,12 +1,22 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, watch, onUnmounted, computed } from 'vue'
-import { fetchRancherVersions, fetchStep1OptionsMerged, generate, exportImageList, fetchLogs, type RancherVersionInfo } from './api/genesis'
+import { ref, reactive, onMounted, watch, onUnmounted, computed, defineAsyncComponent } from 'vue'
+import {
+  fetchRancherVersions,
+  fetchStep1OptionsMerged,
+  generate,
+  exportImageList,
+  fetchLogs,
+  peekRancherVersionsCache,
+  peekStep1OptionsCache,
+  type RancherVersionInfo,
+} from './api/genesis'
 import type { Step1OptionsResponse, GenerateRequest, GenerateResponse } from './types/genesis'
 import Step1Form from './components/Step1Form.vue'
 import Step3Tree from './components/Step3Tree.vue'
 import SelectionOverview from './components/SelectionOverview.vue'
-import DocsViewer from './components/DocsViewer.vue'
 import LoadingShapes from './components/LoadingShapes.vue'
+
+const DocsViewer = defineAsyncComponent(() => import('./components/DocsViewer.vue'))
 import {
   cniDocs,
   cniRelease,
@@ -87,6 +97,37 @@ const genRequest = reactive<GenerateRequest>({
   rke2Versions: [],
   destinationRegistry: '',
 })
+
+const LS_RANCHER_VERSIONS = 'genesis-rancher-versions'
+
+function restorePersistedRancherVersions() {
+  try {
+    const raw = localStorage.getItem(LS_RANCHER_VERSIONS)
+    if (!raw || genRequest.rancherVersions?.length) return
+    const versions = JSON.parse(raw) as string[]
+    if (!versions?.length) return
+    genRequest.rancherVersions = versions
+    genRequest.rancherVersion = versions[0] ?? ''
+  } catch {
+    /* ignore */
+  }
+}
+
+function hydrateFromClientCache() {
+  const cachedVersions = peekRancherVersionsCache(includeRC.value)
+  if (cachedVersions?.length) rancherVersions.value = cachedVersions
+
+  const selected = genRequest.rancherVersions?.length
+    ? genRequest.rancherVersions
+    : (genRequest.rancherVersion ? [genRequest.rancherVersion] : [])
+  if (selected.length === 1 && selected[0]) {
+    const cachedOptions = peekStep1OptionsCache(selected[0], includeRC.value, includeGitHubVersions.value)
+    if (cachedOptions) step1Options.value = cachedOptions
+  }
+}
+
+restorePersistedRancherVersions()
+hydrateFromClientCache()
 
 const genResponse = ref<GenerateResponse | null>(null)
 const genError = ref('')
@@ -197,9 +238,25 @@ watch(includeRC, async () => {
 })
 watch(includeGitHubVersions, () => { loadOptions() })
 
-onMounted(async () => {
-  await loadRancherVersions()
-  loadOptions()
+watch(
+  () => genRequest.rancherVersions,
+  (versions) => {
+    if (versions?.length) {
+      try {
+        localStorage.setItem(LS_RANCHER_VERSIONS, JSON.stringify(versions))
+      } catch {
+        /* quota */
+      }
+    }
+  },
+  { deep: true }
+)
+
+onMounted(() => {
+  if (genRequest.rancherVersions?.length || genRequest.rancherVersion) {
+    void loadOptions()
+  }
+  void loadRancherVersions()
 })
 
 async function runGenerate() {

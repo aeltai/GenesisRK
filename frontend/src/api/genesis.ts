@@ -35,6 +35,26 @@ function cacheSet<T>(key: string, data: T) {
 
 const inflight = new Map<string, Promise<unknown>>()
 
+/** Synchronous sessionStorage read for instant UI hydration on repeat visits. */
+export function peekSessionCache<T>(key: string, ttlMs: number): T | null {
+  return cacheGet<T>(key, ttlMs)
+}
+
+export function peekRancherVersionsCache(includeRC = false): RancherVersionInfo[] | null {
+  return peekSessionCache<RancherVersionInfo[]>(`rancher-versions:rc=${includeRC}`, RANCHER_VERSIONS_TTL_MS)
+}
+
+export function peekStep1OptionsCache(
+  rancherVersion: string,
+  includeRC = false,
+  includeGitHubVersions = false
+): Step1OptionsResponse | null {
+  return peekSessionCache<Step1OptionsResponse>(
+    `step1:${rancherVersion}:rc=${includeRC}:gh=${includeGitHubVersions}`,
+    STEP1_OPTIONS_TTL_MS
+  )
+}
+
 async function fetchCached<T>(key: string, ttlMs: number, fetcher: () => Promise<T>): Promise<T> {
   const hit = cacheGet<T>(key, ttlMs)
   if (hit !== null) return hit

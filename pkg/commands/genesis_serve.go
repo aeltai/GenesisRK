@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -369,6 +371,7 @@ func newGenesisServeCmd(parent *genesisCmd) {
 			}
 			addr := ":" + port
 			logrus.Infof("Genesis API server listening on %s", addr)
+			go warmupGenesisAPICache()
 			return http.ListenAndServe(addr, corsMiddleware(mux))
 		},
 	}
@@ -380,6 +383,37 @@ func newGenesisServeCmd(parent *genesisCmd) {
 // githubTagsResponse is a minimal struct for GitHub tags API response.
 type githubTag struct {
 	Name string `json:"name"`
+}
+
+// warmupGenesisAPICache pre-fetches Rancher versions and step1 options so the
+// first real user request after deploy/restart does not wait on GitHub + KDM.
+func warmupGenesisAPICache() {
+	time.Sleep(500 * time.Millisecond)
+	logrus.Info("Warming Genesis API cache (rancher-versions, step1-options)...")
+	w := httptest.NewRecorder()
+	handleRancherVersions(w, httptest.NewRequest(http.MethodGet, "/api/rancher-versions", nil))
+	if w.Code != http.StatusOK {
+		logrus.Warnf("Genesis cache warmup: rancher-versions HTTP %d", w.Code)
+		return
+	}
+	var payload struct {
+		Versions []struct {
+			Version string `json:"version"`
+		} `json:"versions"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &payload); err != nil || len(payload.Versions) == 0 {
+		logrus.Warn("Genesis cache warmup: no rancher versions parsed")
+		return
+	}
+	latest := payload.Versions[0].Version
+	step1URL := "/api/step1-options?rancher=" + url.QueryEscape(latest)
+	w2 := httptest.NewRecorder()
+	handleStep1Options(w2, httptest.NewRequest(http.MethodGet, step1URL, nil))
+	if w2.Code != http.StatusOK {
+		logrus.Warnf("Genesis cache warmup: step1-options for %s HTTP %d", latest, w2.Code)
+		return
+	}
+	logrus.Infof("Genesis API cache warmed for %s", latest)
 }
 
 func handleRancherVersions(w http.ResponseWriter, r *http.Request) {

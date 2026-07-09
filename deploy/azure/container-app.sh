@@ -107,6 +107,10 @@ do_up() {
       --image "$FULL_IMAGE" --output none || true
   fi
 
+  log "Setting min replicas to 1 (avoid cold-start latency)..."
+  az containerapp update --name "$CONTAINERAPP_NAME" --resource-group "$RESOURCE_GROUP_NAME" \
+    --min-replicas 1 --output none 2>/dev/null || true
+
   # Pass GitHub token from local .env into the container app (avoids API rate limits)
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     log "Setting GITHUB_TOKEN on container app..."
