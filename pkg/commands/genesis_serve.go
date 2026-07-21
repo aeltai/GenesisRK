@@ -127,6 +127,11 @@ type genesisJob struct {
 	basicCharts         []treeNode
 	basicImageComponent map[string]string
 	pastSelection       string
+	// linuxImagesSnapshot/windowsImagesSnapshot capture the full generated image
+	// sets so repeated exports on the same job are idempotent (finish() mutates
+	// the generator's image maps when filtering by selection).
+	linuxImagesSnapshot   map[string]map[string]bool
+	windowsImagesSnapshot map[string]map[string]bool
 }
 
 var (
@@ -308,6 +313,23 @@ type ExportRequest struct {
 	SelectedComponentIDs []string `json:"selectedComponentIDs"`
 	ChartNames           []string `json:"chartNames"`
 	SelectedImageRefs    []string `json:"selectedImageRefs"`
+}
+
+// cloneImageSet returns a deep copy of an image-set map so callers can mutate
+// their copy without affecting the shared snapshot stored on the genesis job.
+func cloneImageSet(set map[string]map[string]bool) map[string]map[string]bool {
+	if set == nil {
+		return make(map[string]map[string]bool)
+	}
+	out := make(map[string]map[string]bool, len(set))
+	for img, sources := range set {
+		cp := make(map[string]bool, len(sources))
+		for s := range sources {
+			cp[s] = true
+		}
+		out[img] = cp
+	}
+	return out
 }
 
 func writeJSON(w http.ResponseWriter, status int, v interface{}) {
@@ -820,12 +842,14 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	jobID := uuid.New().String()
 	genesisJobsMu.Lock()
 	genesisJobs[jobID] = &genesisJob{
-		cc:                  firstCC,
-		created:             time.Now(),
-		roots:               roots,
-		basicCharts:         basicCharts,
-		basicImageComponent: basicImageComponent,
-		pastSelection:       pastSelection,
+		cc:                    firstCC,
+		created:               time.Now(),
+		roots:                 roots,
+		basicCharts:           basicCharts,
+		basicImageComponent:   basicImageComponent,
+		pastSelection:         pastSelection,
+		linuxImagesSnapshot:   cloneImageSet(firstCC.generator.LinuxImages),
+		windowsImagesSnapshot: cloneImageSet(firstCC.generator.WindowsImages),
 	}
 	genesisJobsMu.Unlock()
 	writeJSON(w, http.StatusOK, GenerateResponse{
@@ -855,6 +879,10 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	cc := job.cc
+	// Restore the full generated image set before each export so repeated
+	// exports with different selections are idempotent (finish() mutates these).
+	cc.generator.LinuxImages = cloneImageSet(job.linuxImagesSnapshot)
+	cc.generator.WindowsImages = cloneImageSet(job.windowsImagesSnapshot)
 	cc.interactiveSelectedComponentIDs = req.SelectedComponentIDs
 	cc.interactiveSelectedChartNames = req.ChartNames
 	cc.interactiveSelectedImageRefs = req.SelectedImageRefs

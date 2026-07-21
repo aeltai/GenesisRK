@@ -2659,7 +2659,16 @@ func (cc *genesisCmd) run(ctx context.Context) error {
 func (cc *genesisCmd) finish() error {
 	totalLinux := len(cc.generator.LinuxImages)
 	totalWindows := len(cc.generator.WindowsImages)
-	if cc.interactive && (len(cc.interactiveSelectedComponentIDs) > 0 || len(cc.interactiveSelectedChartNames) > 0) {
+	// Apply selection filtering whenever a selection was made, regardless of
+	// interactive mode. Config-file mode and the API export path set these
+	// selections but run with interactive=false; without this the exported
+	// list would ignore the user's group/chart selection and dump every image.
+	// Apply selection filtering whenever a selection was made, regardless of
+	// interactive mode. Config-file mode and the API export path set these
+	// selections but run with interactive=false; without this the exported
+	// list would ignore the user's group/chart selection and dump every image.
+	// imageRefs alone (e.g. frontend preview export) must also trigger filtering.
+	if len(cc.interactiveSelectedComponentIDs) > 0 || len(cc.interactiveSelectedChartNames) > 0 || len(cc.interactiveSelectedImageRefs) > 0 {
 		if len(cc.interactiveSelectedImageRefs) > 0 {
 			// Use exact image set from TUI so output matches preview
 			refSet := make(map[string]bool)
