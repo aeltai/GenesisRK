@@ -1,0 +1,39 @@
+# Fly.io deployment config for GenesisRK.
+# Deploy with: bash deploy/fly/deploy.sh
+#
+# App must already exist (created once):
+#   flyctl apps create genesisrk --org personal
+#
+# Set the GitHub token as a secret (avoids API rate limits when Genesis
+# fetches Rancher/K3s/RKE2 versions and release notes):
+#   flyctl secrets set GITHUB_TOKEN=ghp_xxx -a genesisrk
+
+app = "genesisrk"
+primary_region = "ams"
+kill_signal = "SIGINT"
+kill_timeout = 60
+
+# Reuse the same multi-stage Dockerfile used for the Azure Container App.
+# The path is passed via `flyctl deploy --dockerfile` (relative to repo root)
+# because Fly resolves [build].dockerfile relative to the fly.toml directory.
+[build]
+
+# Public HTTPS endpoint. The container listens on 8080 (see Dockerfile.genesis).
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+
+[http_service.concurrency]
+  type = "requests"
+  hard_limit = 250
+  soft_limit = 200
+
+# Genesis generate() clones rancher/charts and fetches KDM/RKE2 release lists,
+# which needs more than the default 256MB. Match the Azure allocation (0.5 vCPU, 1Gi).
+[[vm]]
+  memory = "1gb"
+  cpu_kind = "shared"
+  cpus = 1

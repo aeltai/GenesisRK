@@ -12,7 +12,6 @@ import {
   KIND_LABELS,
   nodeTooltip,
 } from '../utils/treeMeta'
-import SelectionOverview from './SelectionOverview.vue'
 import {
   cniDocs,
   cniRelease,
@@ -379,7 +378,6 @@ function imageTooltip(img: string): string {
 }
 
 const glossaryOpen = ref(false)
-const overviewOpen = ref(true)
 
 /** Known chart name → upstream GitHub repo for release links */
 const CHART_UPSTREAM: Record<string, string> = {
@@ -782,35 +780,6 @@ function toggleReleaseNotes() {
         </div>
       </div>
     </div>
-
-    <div class="step3-overview-footer">
-      <button
-        v-if="!overviewOpen"
-        type="button"
-        class="btn-overview-toggle btn-overview-show"
-        @click="overviewOpen = true"
-      >
-        Show platform DNA
-      </button>
-      <div v-else class="step3-overview">
-        <SelectionOverview
-          compact
-          :rancher-versions="rancherVersions"
-          :distros="distros"
-          :cni="cniForStandard"
-          :k3s-versions="k3sVersions"
-          :rke2-versions="rke2Versions"
-          :available-rancher-versions="availableRancherVersions"
-          :available-k3s-versions="availableK3sVersions"
-          :available-rke2-versions="availableRke2Versions"
-          :include-windows="includeWindows"
-          :load-balancers="loadBalancers ?? []"
-          :chart-count="previewCharts.length"
-          :image-count="previewImages.length"
-        />
-        <button type="button" class="btn-overview-toggle" @click="overviewOpen = false">Hide platform DNA</button>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -820,36 +789,6 @@ function toggleReleaseNotes() {
   flex-direction: column;
   gap: 0.75rem;
   flex: 1;
-}
-.step3-overview-footer {
-  margin-top: 0.5rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid var(--border);
-  flex-shrink: 0;
-}
-.step3-overview {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: color-mix(in srgb, var(--panel) 85%, var(--bg));
-}
-.btn-overview-toggle {
-  align-self: flex-start;
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-  cursor: pointer;
-  padding: 0.15rem 0;
-}
-.btn-overview-toggle:hover {
-  color: var(--accent);
-}
-.btn-overview-show {
-  margin-top: 0.25rem;
 }
 .chart-release-link {
   flex-shrink: 0;

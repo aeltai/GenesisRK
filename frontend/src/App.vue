@@ -13,7 +13,6 @@ import {
 import type { Step1OptionsResponse, GenerateRequest, GenerateResponse } from './types/genesis'
 import Step1Form from './components/Step1Form.vue'
 import Step3Tree from './components/Step3Tree.vue'
-import SelectionOverview from './components/SelectionOverview.vue'
 import LoadingShapes from './components/LoadingShapes.vue'
 
 const DocsViewer = defineAsyncComponent(() => import('./components/DocsViewer.vue'))
@@ -313,10 +312,9 @@ function backToStep1() {
       <div class="hero-inner">
         <a href="#" class="hero-brand" @click.prevent="goBackToApp">
           <h1 class="hero-brand-lockup">
-            <img src="/genesisrk-logo.png" alt="GenesisRK" class="hero-logo" width="416" height="427" />
+            <span class="hero-name">GenesisRK</span>
           </h1>
           <span class="hero-version">v{{ VERSION }}</span>
-          <span class="hero-name">GenesisRK</span>
         </a>
         <div class="hero-actions">
           <a href="https://github.com/aeltai/GenesisRK" target="_blank" rel="noopener noreferrer" class="hero-link" title="GitHub Repository">
@@ -371,18 +369,6 @@ function backToStep1() {
             <p v-if="genError" class="error">{{ genError }}</p>
           </div>
           <aside v-if="(genRequest.rancherVersions?.length || genRequest.rancherVersion) && step1Options" class="step1-details">
-            <SelectionOverview
-              :rancher-versions="genRequest.rancherVersions?.length ? genRequest.rancherVersions : (genRequest.rancherVersion ? [genRequest.rancherVersion] : [])"
-              :distros="genRequest.distros"
-              :cni="genRequest.cni"
-              :k3s-versions="genRequest.distros.includes('k3s') ? genRequest.k3sVersions : []"
-              :rke2-versions="genRequest.distros.includes('rke2') ? genRequest.rke2Versions : []"
-              :available-rancher-versions="availableRancherVersionIds"
-              :available-k3s-versions="availableK3sVersionIds"
-              :available-rke2-versions="availableRke2VersionIds"
-              :include-windows="genRequest.includeWindows"
-              :load-balancers="selectedLoadBalancers"
-            />
             <div class="details-section details-section-spaced">
               <h4 class="details-heading">Rancher</h4>
               <ul class="details-links">
