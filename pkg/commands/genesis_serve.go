@@ -367,16 +367,8 @@ func writeErr(w http.ResponseWriter, status int, msg string) {
 }
 
 func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, HEAD, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	// Kept as an alias for older call sites / tests.
+	return securityHeadersMiddleware(next)
 }
 
 // newGenesisServeCmd adds the "genesis serve" subcommand to the genesis command.
@@ -411,6 +403,9 @@ func newGenesisServeCmd(parent *genesisCmd) {
 			mux.HandleFunc("/api/openapi.yaml", handleOpenAPISpec)
 			mux.HandleFunc("/api/openapi", handleOpenAPISpec)
 			mux.HandleFunc("/api/docs", handleSwaggerUI)
+			mux.HandleFunc("/.well-known/security.txt", handleSecurityTxt)
+			mux.HandleFunc("/security.txt", handleSecurityTxt)
+			mux.HandleFunc("/robots.txt", handleRobotsTxt)
 			if staticDir != "" {
 				fs := http.FileServer(http.Dir(staticDir))
 				mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -421,7 +416,7 @@ func newGenesisServeCmd(parent *genesisCmd) {
 			addr := ":" + port
 			logrus.Infof("Genesis API server listening on %s", addr)
 			go warmupGenesisAPICache()
-			return http.ListenAndServe(addr, corsMiddleware(mux))
+			return http.ListenAndServe(addr, securityHeadersMiddleware(mux))
 		},
 	}
 	cmd.Flags().String("port", "8080", "Port to listen on")
