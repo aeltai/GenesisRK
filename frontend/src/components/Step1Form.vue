@@ -183,21 +183,12 @@ function setLbActive(id: LoadBalancerOption['id'], value: boolean) {
   }
 }
 
-// Options that share the same (distro, role) are competing implementations
-// of the same function (e.g. RKE2's NGINX vs Traefik are both ingress
-// controllers) and are mutually exclusive: selecting one deselects the other
-// so the final image list always matches what's shown as active. Options
-// with different roles (e.g. K3s Klipper ServiceLB vs Traefik ingress) are
-// independent and are not affected by each other. Clicking an already-active
-// option turns it off.
+// Independent toggles: each option adds/removes its images from the air-gap
+// list. A live cluster usually runs only one RKE2 ingress, but packing both
+// NGINX and Traefik images is valid when generating a combined list.
 function toggleLb(id: LoadBalancerOption['id']) {
-  const opt = LOAD_BALANCER_OPTIONS.find((o) => o.id === id)
-  if (!opt) return
-  const turningOn = !isLbActive(id)
-  for (const sibling of visibleLbOptions.value) {
-    if (sibling.distro !== opt.distro || sibling.role !== opt.role) continue
-    setLbActive(sibling.id, sibling.id === id ? turningOn : false)
-  }
+  if (!LOAD_BALANCER_OPTIONS.some((o) => o.id === id)) return
+  setLbActive(id, !isLbActive(id))
 }
 
 // When distros change, reset CNI and LB options for deselected distros
@@ -752,6 +743,7 @@ onUnmounted(() => {
 
     <div v-if="distros.length > 0 && visibleLbOptions.length" class="field lb-field">
       <label>Load balancer / Ingress</label>
+      <p class="field-hint">Select one or more to include their images. A cluster usually runs one ingress; packing both is fine for air-gap lists.</p>
       <div v-for="group in lbGroups" :key="group.distro" class="lb-group">
         <div class="lb-group-head">
           <img :src="brandIcon(group.iconKey)" alt="" class="lb-group-logo" />

@@ -81,6 +81,10 @@ export interface LoadBalancerOption {
   label: string
   subtitle: string
   distro: 'k3s' | 'rke2'
+  // Role is informational (ingress vs ServiceLB). The UI allows multi-select so
+  // air-gap lists can include every chosen option's images (e.g. both RKE2
+  // NGINX and Traefik), even though a live cluster typically runs only one ingress.
+  role: 'ingress' | 'lb-service'
   iconKey: keyof typeof import('./brandIcons').BRAND_ICONS
   docsUrl: string
   releaseUrl?: string
@@ -92,6 +96,7 @@ export const LOAD_BALANCER_OPTIONS: LoadBalancerOption[] = [
     label: 'Klipper LB',
     subtitle: 'K3s built-in ServiceLB',
     distro: 'k3s',
+    role: 'lb-service',
     iconKey: 'k3s',
     docsUrl: 'https://docs.k3s.io/networking/networking-services#klipper-lb',
   },
@@ -100,6 +105,7 @@ export const LOAD_BALANCER_OPTIONS: LoadBalancerOption[] = [
     label: 'Traefik',
     subtitle: 'K3s ingress controller',
     distro: 'k3s',
+    role: 'ingress',
     iconKey: 'traefik',
     docsUrl: 'https://doc.traefik.io/traefik/',
     releaseUrl: 'https://github.com/traefik/traefik/releases',
@@ -109,6 +115,7 @@ export const LOAD_BALANCER_OPTIONS: LoadBalancerOption[] = [
     label: 'NGINX Ingress',
     subtitle: 'RKE2 default ingress',
     distro: 'rke2',
+    role: 'ingress',
     iconKey: 'nginx',
     docsUrl: 'https://kubernetes.github.io/ingress-nginx/',
     releaseUrl: 'https://github.com/kubernetes/ingress-nginx/releases',
@@ -118,6 +125,7 @@ export const LOAD_BALANCER_OPTIONS: LoadBalancerOption[] = [
     label: 'Traefik',
     subtitle: 'RKE2 ingress controller',
     distro: 'rke2',
+    role: 'ingress',
     iconKey: 'traefik',
     docsUrl: 'https://doc.traefik.io/traefik/',
     releaseUrl: 'https://github.com/traefik/traefik/releases',
@@ -225,4 +233,130 @@ export function formatVersionList(versions: string[], max = 3): string {
   if (!versions?.length || versions.includes('all')) return 'All'
   if (versions.length <= max) return versions.join(', ')
   return `${versions.slice(0, max).join(', ')} +${versions.length - max}`
+}
+
+/** Upstream open-source project for container images (GitHub + optional docs). */
+export interface UpstreamProject {
+  repo: string
+  docs?: string
+  label: string
+}
+
+/**
+ * Image/chart name fragment → upstream OSS project.
+ * Keys are matched against image short name, repo path segments, and chart name (longest key wins).
+ */
+export const UPSTREAM_PROJECTS: Record<string, UpstreamProject> = {
+  'hardened-calico': { repo: 'projectcalico/calico', docs: 'https://docs.tigera.io/calico/latest/about/', label: 'Calico' },
+  'calico-node': { repo: 'projectcalico/calico', docs: 'https://docs.tigera.io/calico/latest/about/', label: 'Calico' },
+  'calico-kube-controllers': { repo: 'projectcalico/calico', label: 'Calico' },
+  calico: { repo: 'projectcalico/calico', docs: 'https://docs.tigera.io/calico/latest/about/', label: 'Calico' },
+  'hardened-canal': { repo: 'projectcalico/calico', docs: 'https://docs.rke2.io/networking/basic_network_options#canal-cni-plugin', label: 'Canal' },
+  canal: { repo: 'projectcalico/calico', docs: 'https://docs.rke2.io/networking/basic_network_options#canal-cni-plugin', label: 'Canal' },
+  'hardened-cilium': { repo: 'cilium/cilium', docs: 'https://docs.cilium.io/en/stable/', label: 'Cilium' },
+  cilium: { repo: 'cilium/cilium', docs: 'https://docs.cilium.io/en/stable/', label: 'Cilium' },
+  'hardened-flannel': { repo: 'flannel-io/flannel', docs: 'https://github.com/flannel-io/flannel#flannel', label: 'Flannel' },
+  flannel: { repo: 'flannel-io/flannel', docs: 'https://github.com/flannel-io/flannel#flannel', label: 'Flannel' },
+  coredns: { repo: 'coredns/coredns', docs: STACK_COMPONENTS.coredns.docs, label: 'CoreDNS' },
+  'rke2-coredns': { repo: 'coredns/coredns', docs: STACK_COMPONENTS.coredns.docs, label: 'CoreDNS' },
+  traefik: { repo: 'traefik/traefik', docs: STACK_COMPONENTS.traefik.docs, label: 'Traefik' },
+  'ingress-nginx': { repo: 'kubernetes/ingress-nginx', docs: STACK_COMPONENTS.ingressNginx.docs, label: 'Ingress NGINX' },
+  'nginx-ingress-controller': { repo: 'kubernetes/ingress-nginx', docs: STACK_COMPONENTS.ingressNginx.docs, label: 'Ingress NGINX' },
+  'metrics-server': { repo: 'kubernetes-sigs/metrics-server', docs: STACK_COMPONENTS.metricsServer.docs, label: 'Metrics Server' },
+  'kube-state-metrics': { repo: 'kubernetes/kube-state-metrics', label: 'kube-state-metrics' },
+  'node-exporter': { repo: 'prometheus/node_exporter', label: 'node-exporter' },
+  prometheus: { repo: 'prometheus/prometheus', label: 'Prometheus' },
+  alertmanager: { repo: 'prometheus/alertmanager', label: 'Alertmanager' },
+  grafana: { repo: 'grafana/grafana', label: 'Grafana' },
+  thanos: { repo: 'thanos-io/thanos', label: 'Thanos' },
+  'prometheus-operator': { repo: 'prometheus-operator/prometheus-operator', label: 'Prometheus Operator' },
+  'config-reloader': { repo: 'prometheus-operator/prometheus-operator', label: 'Prometheus Operator' },
+  'fluent-bit': { repo: 'fluent/fluent-bit', label: 'Fluent Bit' },
+  fluentbit: { repo: 'fluent/fluent-bit', label: 'Fluent Bit' },
+  fluentd: { repo: 'fluent/fluentd', label: 'Fluentd' },
+  velero: { repo: 'vmware-tanzu/velero', label: 'Velero' },
+  longhorn: { repo: 'longhorn/longhorn', label: 'Longhorn' },
+  'longhorn-manager': { repo: 'longhorn/longhorn', label: 'Longhorn' },
+  'longhorn-engine': { repo: 'longhorn/longhorn', label: 'Longhorn' },
+  'longhorn-instance-manager': { repo: 'longhorn/longhorn', label: 'Longhorn' },
+  neuvector: { repo: 'neuvector/neuvector', label: 'NeuVector' },
+  gatekeeper: { repo: 'open-policy-agent/gatekeeper', label: 'Gatekeeper' },
+  fleet: { repo: 'rancher/fleet', docs: STACK_COMPONENTS.fleet.docs, label: 'Fleet' },
+  'fleet-agent': { repo: 'rancher/fleet', docs: STACK_COMPONENTS.fleet.docs, label: 'Fleet' },
+  'local-path-provisioner': { repo: 'rancher/local-path-provisioner', label: 'Local Path Provisioner' },
+  'snapshot-controller': { repo: 'kubernetes-csi/external-snapshotter', label: 'Snapshot Controller' },
+  'system-upgrade-controller': { repo: 'rancher/system-upgrade-controller', label: 'System Upgrade Controller' },
+  rancher: { repo: 'rancher/rancher', label: 'Rancher' },
+  'rancher-agent': { repo: 'rancher/rancher', label: 'Rancher' },
+  pause: { repo: 'kubernetes/kubernetes', label: 'Kubernetes pause' },
+  'kube-proxy': { repo: 'kubernetes/kubernetes', label: 'Kubernetes' },
+  'kube-apiserver': { repo: 'kubernetes/kubernetes', label: 'Kubernetes' },
+  'kube-controller-manager': { repo: 'kubernetes/kubernetes', label: 'Kubernetes' },
+  'kube-scheduler': { repo: 'kubernetes/kubernetes', label: 'Kubernetes' },
+  etcd: { repo: 'etcd-io/etcd', label: 'etcd' },
+  istio: { repo: 'istio/istio', label: 'Istio' },
+  pilot: { repo: 'istio/istio', label: 'Istio' },
+  proxyv2: { repo: 'istio/istio', label: 'Istio' },
+}
+
+function normalizeUpstreamKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9-]/g, '')
+}
+
+/** Resolve upstream OSS project for an image ref (and optional chart name). */
+export function resolveUpstreamProject(ref: string, chartName?: string, shortName?: string, repoPath?: string): UpstreamProject | undefined {
+  const short = normalizeUpstreamKey(shortName ?? ref.split('/').pop()?.split(':')[0] ?? ref)
+  const parts = (repoPath ?? ref).split(/[/:]/).map(normalizeUpstreamKey).filter(Boolean)
+  const chart = chartName ? normalizeUpstreamKey(chartName) : ''
+  const candidates = [short, chart, ...parts]
+
+  for (const c of candidates) {
+    if (c && UPSTREAM_PROJECTS[c]) return UPSTREAM_PROJECTS[c]
+  }
+
+  const keys = Object.keys(UPSTREAM_PROJECTS).sort((a, b) => b.length - a.length)
+  for (const c of candidates) {
+    if (!c) continue
+    for (const k of keys) {
+      if (c.includes(k)) return UPSTREAM_PROJECTS[k]
+    }
+  }
+  return undefined
+}
+
+/** GitHub releases page for the upstream OSS project behind an image. */
+export function imageUpstreamReleaseUrl(
+  ref: string,
+  chartName?: string,
+  shortName?: string,
+  repoPath?: string,
+  tag?: string,
+): string | undefined {
+  const project = resolveUpstreamProject(ref, chartName, shortName, repoPath)
+  if (!project) return undefined
+  if (tag) {
+    const t = tag.startsWith('v') ? tag : `v${tag}`
+    return githubRelease(project.repo, t)
+  }
+  return githubLatest(project.repo)
+}
+
+/** Upstream documentation URL when known. */
+export function imageUpstreamDocsUrl(
+  ref: string,
+  chartName?: string,
+  shortName?: string,
+  repoPath?: string,
+): string | undefined {
+  return resolveUpstreamProject(ref, chartName, shortName, repoPath)?.docs
+}
+
+/** Human label for upstream project link text. */
+export function imageUpstreamLabel(
+  ref: string,
+  chartName?: string,
+  shortName?: string,
+  repoPath?: string,
+): string | undefined {
+  return resolveUpstreamProject(ref, chartName, shortName, repoPath)?.label
 }
