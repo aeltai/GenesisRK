@@ -6,14 +6,21 @@ import {
   generate,
   exportImageList,
   fetchLogs,
+  fetchProgress,
   peekRancherVersionsCache,
   peekStep1OptionsCache,
   type RancherVersionInfo,
 } from './api/genesis'
 import type { Step1OptionsResponse, GenerateRequest, GenerateResponse } from './types/genesis'
+import { isRancherPreRelease, pickLatestStableRancherVersion } from './utils/versionLifecycle'
 import Step1Form from './components/Step1Form.vue'
 import Step3Tree from './components/Step3Tree.vue'
 import LoadingShapes from './components/LoadingShapes.vue'
+import LoadingProgressBar from './components/LoadingProgressBar.vue'
+import ServerLogsPanel from './components/ServerLogsPanel.vue'
+import GenesisRootMark from './components/GenesisRootMark.vue'
+import { deriveGenerateProgress, formatLogsForDisplay } from './utils/serverLogs'
+import type { ProgressResponse } from './api/genesis'
 
 const DocsViewer = defineAsyncComponent(() => import('./components/DocsViewer.vue'))
 import {
@@ -81,11 +88,16 @@ const genRequest = reactive<GenerateRequest>({
   rancherVersion: '',
   rancherVersions: [],
   isRPMGC: false,
+  includeCommunityImageLists: true,
   includeAppCollectionCharts: false,
+  includePartnerCharts: false,
+  includeUIPluginCharts: false,
   appCollectionAPIUser: '',
   appCollectionAPIPassword: '',
   distros: ['rke2'],
   cni: 'cni_calico',
+  cnis: [],
+  arch: 'amd64',
   loadBalancer: true,
   lbK3sKlipper: false,
   lbK3sTraefik: false,
@@ -94,16 +106,20 @@ const genRequest = reactive<GenerateRequest>({
   includeWindows: false,
   k3sVersions: [],
   rke2Versions: [],
+  includeDeprecatedPatches: false,
   destinationRegistry: '',
 })
 
 const LS_RANCHER_VERSIONS = 'genesis-rancher-versions'
 
+/** K3s/RKE2 GitHub pre-releases only apply when that opt-in is enabled. */
+const includeDistroRC = computed(() => includeGitHubVersions.value && includeRC.value)
+
 function restorePersistedRancherVersions() {
   try {
     const raw = localStorage.getItem(LS_RANCHER_VERSIONS)
     if (!raw || genRequest.rancherVersions?.length) return
-    const versions = JSON.parse(raw) as string[]
+    const versions = (JSON.parse(raw) as string[]).filter((v) => !isRancherPreRelease(v))
     if (!versions?.length) return
     genRequest.rancherVersions = versions
     genRequest.rancherVersion = versions[0] ?? ''
@@ -113,14 +129,14 @@ function restorePersistedRancherVersions() {
 }
 
 function hydrateFromClientCache() {
-  const cachedVersions = peekRancherVersionsCache(includeRC.value)
+  const cachedVersions = peekRancherVersionsCache(false)
   if (cachedVersions?.length) rancherVersions.value = cachedVersions
 
   const selected = genRequest.rancherVersions?.length
     ? genRequest.rancherVersions
     : (genRequest.rancherVersion ? [genRequest.rancherVersion] : [])
   if (selected.length === 1 && selected[0]) {
-    const cachedOptions = peekStep1OptionsCache(selected[0], includeRC.value, includeGitHubVersions.value)
+    const cachedOptions = peekStep1OptionsCache(selected[0], includeDistroRC.value, includeGitHubVersions.value, genRequest.includeDeprecatedPatches ?? false)
     if (cachedOptions) step1Options.value = cachedOptions
   }
 }
@@ -131,22 +147,44 @@ hydrateFromClientCache()
 const genResponse = ref<GenerateResponse | null>(null)
 const genError = ref('')
 const exportError = ref('')
-const showLogs = ref(false)
 const serverLogs = ref<string[]>([])
-const logsContentRef = ref<HTMLElement | null>(null)
+const loadingProgress = ref<ProgressResponse>({ active: true, percent: 0, phase: 'Starting generation…' })
 let logsPollTimer: ReturnType<typeof setInterval> | null = null
+let loadingStartedAt = 0
+
+const formattedServerLogs = computed(() => formatLogsForDisplay(serverLogs.value))
 
 function startLogsPoll() {
   if (logsPollTimer) return
   async function poll() {
     try {
-      serverLogs.value = await fetchLogs()
+      const [lines, progress] = await Promise.all([fetchLogs(), fetchProgress()])
+      serverLogs.value = lines
+      const logProgress = deriveGenerateProgress(lines, loadingStartedAt)
+      const prev = loadingProgress.value
+      const apiUsable = progress.active && progress.phase !== 'Idle'
+      if (apiUsable) {
+        loadingProgress.value = {
+          active: true,
+          percent: Math.max(prev.percent, progress.percent),
+          phase: progress.phase,
+          detail: progress.detail,
+          current: progress.current,
+          total: progress.total,
+        }
+      } else {
+        loadingProgress.value = {
+          active: true,
+          percent: Math.max(prev.percent, logProgress.percent),
+          phase: logProgress.phase,
+        }
+      }
     } catch {
       // ignore
     }
   }
   poll()
-  logsPollTimer = setInterval(poll, 1500)
+  logsPollTimer = setInterval(poll, 500)
 }
 
 function stopLogsPoll() {
@@ -156,15 +194,9 @@ function stopLogsPoll() {
   }
 }
 
-watch(
-  () => [step.value, showLogs.value] as const,
-  ([s, show]) => {
-    if (s === 'loading' && show) startLogsPoll()
-    else stopLogsPoll()
-  }
-)
-watch(serverLogs, () => {
-  if (logsContentRef.value) logsContentRef.value.scrollTop = logsContentRef.value.scrollHeight
+watch(step, (s) => {
+  if (s === 'loading') startLogsPoll()
+  else stopLogsPoll()
 })
 onUnmounted(stopLogsPoll)
 
@@ -193,17 +225,36 @@ const lbComponentLinks = computed(() =>
 const optionsLoading = ref(false)
 let loadAbort: AbortController | null = null
 
+function setRancherSelection(versions: string[]) {
+  genRequest.rancherVersions = versions
+  genRequest.rancherVersion = versions[0] ?? ''
+}
+
+function sanitizeRancherSelection() {
+  const available = rancherVersions.value.map((v) => v.version)
+  const allowed = new Set(available)
+  let sel = (genRequest.rancherVersions ?? []).filter((v) => allowed.has(v) && !isRancherPreRelease(v))
+  if (!sel.length) {
+    const latest = pickLatestStableRancherVersion(available)
+    if (latest) sel = [latest]
+  }
+  if (sel.length) setRancherSelection(sel)
+}
+
 function applyLatestRancherDefault() {
-  if (genRequest.rancherVersions?.length || genRequest.rancherVersion) return
-  const latest = rancherVersions.value[0]?.version
+  if (genRequest.rancherVersions?.length) {
+    sanitizeRancherSelection()
+    return
+  }
+  const latest = pickLatestStableRancherVersion(rancherVersions.value.map((v) => v.version))
   if (!latest) return
-  genRequest.rancherVersion = latest
-  genRequest.rancherVersions = [latest]
+  setRancherSelection([latest])
 }
 
 async function loadRancherVersions() {
   try {
-    rancherVersions.value = await fetchRancherVersions(includeRC.value)
+    // Rancher version dropdown is stable releases only; RC/alpha are not mixed in from K3s/RKE2 toggles.
+    rancherVersions.value = await fetchRancherVersions(false)
     applyLatestRancherDefault()
   } catch { /* ignore */ }
 }
@@ -221,7 +272,7 @@ async function loadOptions() {
     return
   }
   try {
-    step1Options.value = await fetchStep1OptionsMerged(versions, includeRC.value, includeGitHubVersions.value)
+    step1Options.value = await fetchStep1OptionsMerged(versions, includeDistroRC.value, includeGitHubVersions.value, genRequest.includeDeprecatedPatches ?? false)
   } catch (e) {
     if ((e as Error).name === 'AbortError') return
     step1Error.value = e instanceof Error ? e.message : String(e)
@@ -231,11 +282,12 @@ async function loadOptions() {
 }
 
 watch(() => [genRequest.rancherVersion, genRequest.rancherVersions], () => { loadOptions() }, { deep: true })
-watch(includeRC, async () => {
-  await loadRancherVersions()
+watch(includeRC, () => { loadOptions() })
+watch(includeGitHubVersions, (on) => {
+  if (!on) includeRC.value = false
   loadOptions()
 })
-watch(includeGitHubVersions, () => { loadOptions() })
+watch(() => genRequest.includeDeprecatedPatches, () => { loadOptions() })
 
 watch(
   () => genRequest.rancherVersions,
@@ -265,13 +317,24 @@ async function runGenerate() {
     genError.value = 'Select at least one Rancher version.'
     return
   }
+  if (!genRequest.includeCommunityImageLists && !genRequest.isRPMGC) {
+    genError.value = 'Select at least one image list source (Community and/or Rancher Prime).'
+    return
+  }
   step.value = 'loading'
+  loadingStartedAt = Date.now()
+  loadingProgress.value = { active: true, percent: 5, phase: 'Starting generation…' }
+  serverLogs.value = []
+  startLogsPoll()
   genRequest.loadBalancer = genRequest.lbK3sKlipper || genRequest.lbK3sTraefik || genRequest.lbRKE2Nginx || genRequest.lbRKE2Traefik
   try {
     genResponse.value = await generate(genRequest)
+    stopLogsPoll()
+    serverLogs.value = []
     step.value = 'step3'
   } catch (e) {
     genError.value = e instanceof Error ? e.message : String(e)
+    stopLogsPoll()
     step.value = 'step1'
   }
 }
@@ -311,6 +374,7 @@ function backToStep1() {
     <header class="hero">
       <div class="hero-inner">
         <a href="#" class="hero-brand" @click.prevent="goBackToApp">
+          <GenesisRootMark class="hero-logo-mark" />
           <h1 class="hero-brand-lockup">
             <span class="hero-name">GenesisRK</span>
           </h1>
@@ -348,16 +412,21 @@ function backToStep1() {
               v-model:rancher-versions="genRequest.rancherVersions"
               v-model:include-r-c="includeRC"
               v-model:include-git-hub-versions="includeGitHubVersions"
-              v-model:is-rpm-gc="genRequest.isRPMGC"
+              v-model:include-deprecated-patches="genRequest.includeDeprecatedPatches"
+              v-model:isRPMGC="genRequest.isRPMGC"
+              v-model:include-community-image-lists="genRequest.includeCommunityImageLists"
               v-model:include-app-collection="genRequest.includeAppCollectionCharts"
+              v-model:include-partner-charts="genRequest.includePartnerCharts"
+              v-model:includeUIPluginCharts="genRequest.includeUIPluginCharts"
               v-model:app-user="genRequest.appCollectionAPIUser"
               v-model:app-password="genRequest.appCollectionAPIPassword"
               v-model:distros="genRequest.distros"
+              v-model:arch="genRequest.arch"
               v-model:cni="genRequest.cni"
               v-model:lb-k3s-klipper="genRequest.lbK3sKlipper"
               v-model:lb-k3s-traefik="genRequest.lbK3sTraefik"
-              v-model:lb-rke2-nginx="genRequest.lbRKE2Nginx"
-              v-model:lb-rke2-traefik="genRequest.lbRKE2Traefik"
+              v-model:lbRKE2Nginx="genRequest.lbRKE2Nginx"
+              v-model:lbRKE2Traefik="genRequest.lbRKE2Traefik"
               v-model:include-windows="genRequest.includeWindows"
               v-model:k3s-versions="genRequest.k3sVersions"
               v-model:rke2-versions="genRequest.rke2Versions"
@@ -446,16 +515,24 @@ function backToStep1() {
       </div>
 
       <div v-else-if="step === 'loading'" class="panel loading-panel">
-        <LoadingShapes size="lg" label="Generating tree from KDM and charts…" />
-        <p class="loading-hint">This may take a minute.</p>
-        <div class="loading-logs">
-          <button type="button" class="logs-toggle" @click="showLogs = !showLogs">
-            {{ showLogs ? 'Hide logs' : 'Show logs' }}
-          </button>
-          <div v-show="showLogs" class="logs-viewer">
-            <pre ref="logsContentRef" class="logs-content">{{ serverLogs.length ? serverLogs.join('\n') : 'Waiting for server logs…' }}</pre>
-          </div>
+        <div class="loading-panel-inner">
+          <LoadingShapes size="md" />
+          <LoadingProgressBar
+            class="loading-panel-progress"
+            centered
+            :percent="loadingProgress.percent"
+            :phase="loadingProgress.phase"
+          />
         </div>
+        <ServerLogsPanel
+          class="loading-logs"
+          centered
+          :entries="formattedServerLogs"
+          title="Server activity"
+          empty-text="Waiting for server activity…"
+          collapsible
+          :default-open="false"
+        />
       </div>
 
       <div v-else-if="step === 'step3' && genResponse" class="panel panel-fullscreen">
@@ -475,6 +552,10 @@ function backToStep1() {
           :available-rke2-versions="availableRke2VersionIds"
           :load-balancers="selectedLoadBalancers"
           :include-windows="genRequest.includeWindows"
+          :is-prime="genRequest.isRPMGC"
+          :arch="genRequest.arch"
+          :include-partner-charts="genRequest.includePartnerCharts"
+          :include-ui-plugin-charts="genRequest.includeUIPluginCharts"
           v-model:destination-registry="genRequest.destinationRegistry"
           @export-list="runExport"
           @back="backToStep1"
@@ -486,7 +567,10 @@ function backToStep1() {
 
     <footer class="footer">
       <a href="#" class="footer-brand" title="GenesisRK home" @click.prevent="goBackToApp">
-        <img src="/genesisrk-logo.png" alt="GenesisRK" class="footer-logo" width="416" height="427" />
+        <span class="footer-logo-mark" aria-hidden="true">
+          <GenesisRootMark />
+        </span>
+        <span>GenesisRK</span>
       </a>
       <span class="footer-sep">·</span>
       <a href="https://github.com/cnrancher/hangar" target="_blank" rel="noopener noreferrer">Hangar</a>
@@ -511,7 +595,7 @@ function backToStep1() {
   color: var(--text);
 }
 .hero {
-  padding: 0.5rem 1.5rem;
+  padding: 0.65rem 1.5rem;
   border-bottom: 1px solid var(--border);
   background: var(--panel);
 }
@@ -521,18 +605,28 @@ function backToStep1() {
   justify-content: space-between;
   gap: 1rem;
   flex-wrap: nowrap;
-  min-height: 2.25rem;
+  min-height: 3.25rem;
 }
 .hero-brand {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.65rem;
   flex-shrink: 0;
   text-decoration: none;
   color: inherit;
 }
 .hero-brand:hover .hero-name {
   color: var(--accent);
+}
+.hero-logo-mark {
+  width: 2.45rem;
+  height: 2.45rem;
+  flex-shrink: 0;
+}
+.hero-logo-mark :deep(svg) {
+  width: 100%;
+  height: 100%;
+  display: block;
 }
 .hero-brand-lockup {
   display: flex;
@@ -543,21 +637,11 @@ function backToStep1() {
   line-height: 1;
 }
 .hero-name {
-  font-size: 0.8125rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-size: 1.125rem;
+  font-weight: 700;
+  letter-spacing: -0.025em;
   color: var(--text);
   transition: color 0.15s;
-}
-.hero-logo {
-  height: 2.15rem;
-  width: auto;
-  display: block;
-  object-fit: contain;
-}
-:root:not([data-theme="light"]) .hero-logo,
-:root:not([data-theme="light"]) .footer-logo {
-  filter: brightness(1.18) contrast(1.05);
 }
 .hero-title {
   transition: color 0.15s;
@@ -852,42 +936,29 @@ function backToStep1() {
 }
 .loading-panel {
   text-align: center;
-  padding: 3rem;
+  padding: 2rem 1.5rem;
+  min-height: calc(100vh - 10rem);
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 0.35rem;
+  justify-content: center;
 }
-.loading-hint {
-  opacity: 0.7;
-  font-size: 0.9rem;
-  margin: 0;
+.loading-panel-inner {
+  width: min(480px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.65rem;
+}
+.loading-panel :deep(.loading-shapes) {
+  --loader-size: 44px;
+}
+.loading-panel-progress {
+  width: 100%;
 }
 .loading-logs {
-  margin-top: 1.5rem;
-  text-align: left;
-  max-width: 900px;
-  margin-left: auto;
-  margin-right: auto;
-}
-.logs-toggle {
-  margin-bottom: 0.5rem;
-}
-.logs-viewer {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg);
-  overflow: hidden;
-}
-.logs-content {
-  margin: 0;
-  padding: 0.75rem 1rem;
-  font-size: 0.8rem;
-  line-height: 1.4;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 320px;
-  overflow: auto;
+  width: min(900px, 100%);
+  margin-top: 1.25rem;
 }
 .error {
   color: var(--red);
@@ -918,15 +989,29 @@ function backToStep1() {
 .footer-brand {
   display: inline-flex;
   align-items: center;
+  gap: 0.3rem;
   text-decoration: none;
-  color: inherit;
+  color: var(--accent);
+  font-weight: 600;
   margin-right: 0.15rem;
 }
-.footer-logo {
-  height: 1.4rem;
-  width: auto;
+.footer-logo-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  flex-shrink: 0;
+  opacity: 0.92;
+}
+.footer-logo-mark :deep(svg) {
+  width: 100%;
+  height: 100%;
   display: block;
-  object-fit: contain;
+}
+.footer-brand:hover {
+  color: var(--accent-hover);
+  text-decoration: underline;
 }
 .footer a {
   color: var(--accent);
@@ -952,10 +1037,11 @@ function backToStep1() {
     font-size: 1rem;
   }
   .hero-name {
-    font-size: 0.75rem;
+    font-size: 1rem;
   }
-  .hero-logo {
-    height: 1.85rem;
+  .hero-logo-mark {
+    width: 2.1rem;
+    height: 2.1rem;
   }
   .hero-actions {
     margin-left: auto;
@@ -998,9 +1084,6 @@ function backToStep1() {
   .loading-panel {
     padding: 2rem 1rem;
   }
-  .logs-content {
-    max-height: 240px;
-  }
 }
 
 @media (max-width: 480px) {
@@ -1014,13 +1097,11 @@ function backToStep1() {
     font-size: 0.9375rem;
   }
   .hero-name {
-    font-size: 0.6875rem;
+    font-size: 0.9375rem;
   }
-  .hero-logo {
-    height: 1.55rem;
-  }
-  .footer-logo {
-    height: 1.1rem;
+  .hero-logo-mark {
+    width: 1.9rem;
+    height: 1.9rem;
   }
   .hero-actions {
     gap: 0.25rem;
@@ -1094,10 +1175,6 @@ function backToStep1() {
   }
   .loading-panel {
     padding: 1.5rem 0.75rem;
-  }
-  .logs-content {
-    max-height: 180px;
-    font-size: 0.75rem;
   }
 }
 </style>
