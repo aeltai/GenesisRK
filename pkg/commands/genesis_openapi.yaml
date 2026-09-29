@@ -46,6 +46,12 @@ paths:
                         date:
                           type: string
                           example: "2026-06-29"
+                        communityAvailable:
+                          type: boolean
+                          description: Listed from rancher/rancher GitHub releases
+                        primeAvailable:
+                          type: boolean
+                          description: rancher-images.txt exists on prime.ribs.rancher.io
   /api/step1-options:
     get:
       tags: [read]
@@ -65,6 +71,11 @@ paths:
           in: query
           schema:
             type: boolean
+        - name: includeDeprecatedPatches
+          in: query
+          schema:
+            type: boolean
+          description: When true, list every KDM patch per Kubernetes minor (kdmRemoveDeprecated=false).
       responses:
         '200':
           description: Distro version capabilities from KDM (+ optional GitHub)
@@ -113,7 +124,7 @@ paths:
   /api/check-availability:
     post:
       tags: [generate]
-      summary: Check registry reachability and pull size
+      summary: Check registry reachability for linux/arch manifests
       requestBody:
         required: true
         content:
@@ -127,10 +138,38 @@ paths:
                   items:
                     type: string
                   example:
-                    - docker.io/rancher/rancher:v2.14.3
+                    - rancher/rancher:v2.14.3
+                arch:
+                  type: string
+                  description: Target platform architecture (amd64 or arm64)
+                  default: amd64
+                  example: amd64
       responses:
         '200':
-          description: Per-image status map
+          description: Per-image status map (status ok | not_found | no_arch | error)
+  /api/image-sizes:
+    post:
+      tags: [generate]
+      summary: Fetch compressed linux/arch pull sizes (independent of availability)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [images]
+              properties:
+                images:
+                  type: array
+                  items:
+                    type: string
+                arch:
+                  type: string
+                  default: amd64
+                  example: arm64
+      responses:
+        '200':
+          description: Per-image sizeBytes when linux/arch exists in manifest
   /api/scan:
     post:
       tags: [scan]
@@ -208,6 +247,32 @@ paths:
       responses:
         '200':
           description: Release metadata
+  /api/progress:
+    get:
+      tags: [read]
+      summary: Generation or scan progress
+      description: Returns weighted progress while POST /api/generate or POST /api/scan is running.
+      responses:
+        '200':
+          description: Progress snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  active:
+                    type: boolean
+                  percent:
+                    type: integer
+                  phase:
+                    type: string
+                  detail:
+                    type: string
+                  current:
+                    type: integer
+                  total:
+                    type: integer
+
   /api/logs:
     get:
       tags: [read]
@@ -239,6 +304,15 @@ components:
           type: boolean
         includeAppCollectionCharts:
           type: boolean
+        includePartnerCharts:
+          type: boolean
+          description: Also include charts from rancher/partner-charts (opt-in).
+        includeUIPluginCharts:
+          type: boolean
+          description: Also include charts from rancher/ui-plugin-charts (opt-in).
+        includeCertManager:
+          type: boolean
+          description: Include jetstack cert-manager images (default true). Required before Rancher Helm install.
         distros:
           type: array
           items:
@@ -246,6 +320,17 @@ components:
             enum: [k3s, rke2, rke]
         cni:
           type: string
+          description: Single CNI id, or comma-separated list when both distros are selected
+        cnis:
+          type: array
+          items:
+            type: string
+          description: Multiple CNI ids (takes precedence over cni)
+        arch:
+          type: string
+          description: Linux node architecture for RKE2 image lists and registry checks
+          enum: [amd64, arm64]
+          default: amd64
         loadBalancer:
           type: boolean
         lbK3sKlipper:
@@ -264,6 +349,9 @@ components:
           type: string
         rkeVersions:
           type: string
+        includeDeprecatedPatches:
+          type: boolean
+          description: Include every KDM patch per Kubernetes minor when resolving distro versions.
     GenerateResponse:
       type: object
       properties:

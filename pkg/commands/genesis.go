@@ -79,20 +79,20 @@ func drawHero() {
 }
 
 type genesisOpts struct {
-	registry       string
-	kdm            string
-	output         string
-	outputWindows  string
-	outputSource   string
-	outputVersions string
-	rancherVersion    string   // single version or display string like "v2.13.1 + v2.14.0-alpha2"
+	registry            string
+	kdm                 string
+	output              string
+	outputWindows       string
+	outputSource        string
+	outputVersions      string
+	rancherVersion      string   // single version or display string like "v2.13.1 + v2.14.0-alpha2"
 	rancherVersionsList []string // when set (multi-version from API), one rancher/rancher image per entry
-	minKubeVersion string
-	dev            bool
-	tlsVerify      bool
-	charts         []string
-	systemCharts   []string
-	autoYes        bool
+	minKubeVersion      string
+	dev                 bool
+	tlsVerify           bool
+	charts              []string
+	systemCharts        []string
+	autoYes             bool
 
 	rke1Images          string
 	rke2Images          string
@@ -125,6 +125,8 @@ type genesisOpts struct {
 	interactiveLBRKE2Traefik bool // RKE2: Traefik ingress
 	// Step 1: include Windows node images (RKE2/K3s); when false, only Linux images are included
 	interactiveIncludeWindows bool
+	// Target linux node architecture for RKE2 image lists (amd64, arm64).
+	targetArch string
 
 	// Scan: run hangar scan on the final image list and add results to output
 	scan        bool
@@ -143,16 +145,24 @@ type genesisCmd struct {
 	*genesisOpts
 
 	isRPMGC                    bool
-	includeAppCollectionCharts bool     // include charts from dp.apps.rancher.io (Application Collection)
-	appCollectionAPIUser       string   // username for api.apps.rancher.io (set when user is prompted)
-	appCollectionAPIPassword   string   // password/token for api.apps.rancher.io
-	appCollectionChartRefs     []string // OCI chart refs (oci://dp.apps.rancher.io/charts/<slug>) for tree display
+	includeCommunityImageLists bool // GitHub k3s/rke2/rancher-images.txt (default true)
+	includeAppCollectionCharts bool                        // include charts from dp.apps.rancher.io (Application Collection)
+	includePartnerCharts       bool                        // include charts from rancher/partner-charts
+	includeUIPluginCharts      bool                        // include charts from rancher/ui-plugin-charts
+	includeCertManager         bool                        // include jetstack cert-manager (required for Rancher Helm install; default true)
+	appCollectionAPIUser       string                      // username for api.apps.rancher.io (set when user is prompted)
+	appCollectionAPIPassword   string                      // password/token for api.apps.rancher.io
+	appCollectionChartRefs     []string                    // OCI chart refs (oci://dp.apps.rancher.io/charts/<slug>) for tree display
+	appCollectionApps          []appcollection.Application // full metadata (name, description, logo, category) for tree display
+	keepChartCache             bool                        // serve mode: keep chart clone cache between generate runs
 	generator                  *listgenerator.Generator
 }
 
 func newGenesisCmd() *genesisCmd {
 	cc := &genesisCmd{
-		genesisOpts: new(genesisOpts),
+		genesisOpts:                new(genesisOpts),
+		includeCommunityImageLists: true,
+		includeCertManager:         true,
 	}
 
 	cc.baseCmd = newBaseCmd(&cobra.Command{
@@ -360,11 +370,15 @@ type generateListConfig struct {
 	CNI                        string              `yaml:"cni"`                        // "cni_canal", "cni_calico", "cni_flannel"
 	LoadBalancer               *bool               `yaml:"loadBalancer"`               // true = include LB/ingress (K3s: Klipper/Traefik, RKE2: NGINX/Traefik), false = exclude
 	IncludeWindows             *bool               `yaml:"includeWindows"`             // true = include Windows node images (RKE2/K3s), false = Linux only (default)
+	Arch                       string              `yaml:"arch"`                       // linux node arch for RKE2 lists: amd64 (default) or arm64
 	Versions                   map[string][]string `yaml:"versions"`                   // {"k3s": ["v1.28.5"], "rke2": ["v1.28.5"]}
 	Groups                     []string            `yaml:"groups"`                     // ["basic", "addons"] or specific chart names
 	Charts                     []string            `yaml:"charts"`                     // Specific chart names to include
 	SourceType                 string              `yaml:"sourceType"`                 // "community" (default) or "prime-gc" (Rancher Prime Manager GC charts/KDM)
 	IncludeAppCollectionCharts *bool               `yaml:"includeAppCollectionCharts"` // true = also include charts from dp.apps.rancher.io (requires helm registry login)
+	IncludePartnerCharts       *bool               `yaml:"includePartnerCharts"`       // true = also include rancher/partner-charts
+	IncludeUIPluginCharts      *bool               `yaml:"includeUIPluginCharts"`      // true = also include rancher/ui-plugin-charts
+	IncludeCertManager         *bool               `yaml:"includeCertManager"`         // true = include jetstack cert-manager images (default true)
 	Scan                       *scanConfig         `yaml:"scan"`                       // Optional scan configuration
 }
 
@@ -397,22 +411,39 @@ func (cc *genesisCmd) loadConfigFile() error {
 		cc.interactiveSelectedCNI = config.CNI
 	}
 
-	// Set source type: community (default) vs prime-gc (Rancher Prime Manager GC)
+	// Set source type: community (default) vs prime vs both
 	switch strings.ToLower(strings.TrimSpace(config.SourceType)) {
 	case "prime-gc", "prime":
 		cc.isRPMGC = true
+		cc.includeCommunityImageLists = false
+	case "both":
+		cc.isRPMGC = true
+		cc.includeCommunityImageLists = true
 	default:
-		// "community" or empty: use standard Rancher Prime Manager charts
+		cc.isRPMGC = false
+		cc.includeCommunityImageLists = true
 	}
 
 	// Include charts from Application Collection (dp.apps.rancher.io)
 	if config.IncludeAppCollectionCharts != nil {
 		cc.includeAppCollectionCharts = *config.IncludeAppCollectionCharts
 	}
+	if config.IncludePartnerCharts != nil {
+		cc.includePartnerCharts = *config.IncludePartnerCharts
+	}
+	if config.IncludeUIPluginCharts != nil {
+		cc.includeUIPluginCharts = *config.IncludeUIPluginCharts
+	}
+	if config.IncludeCertManager != nil {
+		cc.includeCertManager = *config.IncludeCertManager
+	}
 
 	// Set Windows support (Linux only vs Linux + Windows node images)
 	if config.IncludeWindows != nil {
 		cc.interactiveIncludeWindows = *config.IncludeWindows
+	}
+	if config.Arch != "" {
+		cc.targetArch = kdmimages.NormalizeLinuxArch(config.Arch)
 	}
 
 	// Set load balancer / ingress (K3s: Klipper/Traefik, RKE2: NGINX/Traefik)
@@ -591,10 +622,16 @@ func (cc *genesisCmd) writeSaveConfig() error {
 	includeLB := cc.interactiveIncludeLB
 
 	sourceType := "community"
-	if cc.isRPMGC {
+	switch {
+	case cc.isRPMGC && cc.includeCommunityImageLists:
+		sourceType = "both"
+	case cc.isRPMGC:
 		sourceType = "prime-gc"
 	}
 	includeAppCollection := cc.includeAppCollectionCharts
+	includePartner := cc.includePartnerCharts
+	includeUIPlugins := cc.includeUIPluginCharts
+	includeCertManager := cc.includeCertManager
 	includeWin := cc.interactiveIncludeWindows
 	config := generateListConfig{
 		Distros:                    distrosClean,
@@ -606,6 +643,9 @@ func (cc *genesisCmd) writeSaveConfig() error {
 		Charts:                     cc.interactiveSelectedChartNames,
 		SourceType:                 sourceType,
 		IncludeAppCollectionCharts: &includeAppCollection,
+		IncludePartnerCharts:       &includePartner,
+		IncludeUIPluginCharts:      &includeUIPlugins,
+		IncludeCertManager:         &includeCertManager,
 	}
 	if cc.scan {
 		config.Scan = &scanConfig{
@@ -708,7 +748,7 @@ func (cc *genesisCmd) runStep1TUI() error {
 	// Build details for Step 1 right panel (KDM URL, image list source)
 	details := Step1Details{
 		KDMURL:          GetKDMURLForDisplay(cc.rancherVersion, cc.isRPMGC, cc.dev),
-		ImageListSource: GetImageListSourceForDisplay(cc.isRPMGC),
+		ImageListSource: GetImageListSourceForDisplay(cc.includeCommunityImageLists, cc.isRPMGC),
 	}
 
 	// Convert capabilities map to string keys for TUI
@@ -1310,6 +1350,8 @@ func inferChartFromImage(img, componentLabel string) string {
 		default:
 			return "rancher"
 		}
+	case "Cert Manager":
+		return "cert-manager"
 	}
 	return "other"
 }
@@ -1355,12 +1397,12 @@ func inferChartVersion(imgs []string) string {
 
 // basicComponentDescriptions explains Essentials subgroups in the Step 3 tree.
 var basicComponentDescriptions = map[string]string{
-	"Rancher":                  "Core Rancher server, agent, webhooks, Fleet GitOps, and auto-deployed system charts.",
-	"CNI":                      "Container network interface (Calico, Canal, Flannel, etc.) — pod networking for your cluster.",
-	"K3s":                      "Lightweight Kubernetes distribution images bundled with your selected K3s version(s).",
-	"RKE2":                     "RKE2 (Rancher Kubernetes Engine 2) node and system images for your selected version(s).",
-	"RKE1":                     "Legacy RKE1 cluster provisioning images (when RKE1 is selected).",
-	"Load Balancer / Ingress":  "Ingress controller or load-balancer images (nginx, Traefik, Klipper) for exposing services.",
+	"Rancher":                 "Core Rancher server, agent, webhooks, Fleet GitOps, and auto-deployed system charts.",
+	"CNI":                     "Container network interface (Calico, Canal, Flannel, etc.) — pod networking for your cluster.",
+	"K3s":                     "Lightweight Kubernetes distribution images bundled with your selected K3s version(s).",
+	"RKE2":                    "RKE2 (Rancher Kubernetes Engine 2) node and system images for your selected version(s).",
+	"RKE1":                    "Legacy RKE1 cluster provisioning images (when RKE1 is selected).",
+	"Load Balancer / Ingress": "Ingress controller or load-balancer images (nginx, Traefik, Klipper) for exposing services.",
 }
 
 // chartCategoryDescriptions explains AddOn chart categories.
@@ -1379,6 +1421,7 @@ var chartCategoryDescriptions = map[string]string{
 	"other":          "Additional marketplace charts not in a named category.",
 	"fleet":          "Fleet GitOps — deploy applications and multi-cluster workloads from Git.",
 	"system":         "Charts auto-deployed by Rancher (webhook, provisioning-capi, system-upgrade).",
+	"cert-manager":   "TLS certificate controller required before installing Rancher with Helm.",
 }
 
 func refsToTreeNodes(refs []string) []treeNode {
@@ -1397,6 +1440,123 @@ func imageTagFromRef(ref string) string {
 		return ref[i+1:]
 	}
 	return ""
+}
+
+// applyChartMetadata enriches a chart tree node with icon URL and description
+// collected from the Helm repo index (when available).
+func (cc *genesisCmd) applyChartMetadata(node *treeNode, chartName string) {
+	if cc.generator == nil {
+		return
+	}
+	meta, ok := cc.generator.ChartMetadata[chartName]
+	if !ok {
+		return
+	}
+	node.IconURL = meta.IconURL
+	if node.Description == "" {
+		node.Description = meta.Description
+	}
+	if node.Version == "" {
+		node.Version = meta.Version
+	}
+}
+
+// chartRepoTypeForSourceGroup maps a source group ID to the ChartMetadata.Repo
+// string collected while fetching charts (see chartimages.ChartMetadata.Repo).
+func chartRepoTypeForSourceGroup(repoID string) string {
+	switch repoID {
+	case listgenerator.SourceGroupPartnerCharts:
+		return "partner"
+	case listgenerator.SourceGroupUIPluginCharts:
+		return "ui-plugins"
+	default:
+		return ""
+	}
+}
+
+// buildChartRepoRoot builds a tree root for one opt-in chart repo (partner
+// charts, UI plugin charts) from the chart groups whose Repo matches repoID.
+// Charts with no container images (typical for UI plugins) are included from
+// ChartMetadata when the repo was fetched. Returns ok=false when the repo
+// contributed no charts.
+func (cc *genesisCmd) buildChartRepoRoot(
+	chartGroups map[string]*listgenerator.ChartComponentGroup,
+	chartNamesSorted []string,
+	repoID, label, description string,
+) (treeNode, bool) {
+	var chartNodes []treeNode
+	totalImgs := 0
+	seen := make(map[string]bool)
+	for _, name := range chartNamesSorted {
+		cg := chartGroups[name]
+		if cg == nil || cg.Repo != repoID {
+			continue
+		}
+		var imgs []string
+		for img := range cg.LinuxImages {
+			imgs = append(imgs, img)
+		}
+		for img := range cg.WindowsImages {
+			if !cg.LinuxImages[img] {
+				imgs = append(imgs, img)
+			}
+		}
+		sort.Strings(imgs)
+		ver := inferChartVersion(imgs)
+		verLabel := ""
+		if ver != "" {
+			verLabel = " " + ver
+		}
+		node := treeNode{
+			Id: name, Label: name + verLabel,
+			Kind: "chart", Count: cg.Count(),
+			Version: ver, Category: cg.Category,
+			Children: refsToTreeNodes(imgs),
+		}
+		cc.applyChartMetadata(&node, name)
+		chartNodes = append(chartNodes, node)
+		totalImgs += cg.Count()
+		seen[name] = true
+	}
+	// UI plugin charts (and some partner charts) may have no container images;
+	// include them from Helm index metadata so the opt-in group still appears.
+	if cc.generator != nil {
+		metaRepoType := chartRepoTypeForSourceGroup(repoID)
+		if metaRepoType != "" {
+			var metaNames []string
+			for name, meta := range cc.generator.ChartMetadata {
+				if meta.Repo == metaRepoType && !seen[name] {
+					metaNames = append(metaNames, name)
+				}
+			}
+			sort.Strings(metaNames)
+			for _, name := range metaNames {
+				meta := cc.generator.ChartMetadata[name]
+				verLabel := ""
+				if meta.Version != "" {
+					verLabel = " " + meta.Version
+				}
+				node := treeNode{
+					Id: name, Label: name + verLabel,
+					Kind: "chart", Count: 0,
+					Version: meta.Version, Description: meta.Description,
+					IconURL: meta.IconURL, Children: nil,
+				}
+				chartNodes = append(chartNodes, node)
+				seen[name] = true
+			}
+		}
+	}
+	if len(chartNodes) == 0 {
+		return treeNode{}, false
+	}
+	return treeNode{
+		Id:    repoID,
+		Label: label + " (" + strconv.Itoa(len(chartNodes)) + " charts, " + strconv.Itoa(totalImgs) + " images)",
+		Kind:  "component", Count: totalImgs,
+		Description: description,
+		Children:    chartNodes,
+	}, true
 }
 
 // buildGenesisTree builds the tree for Step 3 (TUI or API). Returns roots, basicCharts, fleetCharts, cniCharts, basicImageComponent, pastSelection.
@@ -1450,7 +1610,13 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 
 	// Group 1: Basic (Rancher components + selected distro + preselected CNI + Fleet)
 	// Basic should contain ALL images directly (flat structure, no sub-groups)
-	basicIDs := listgenerator.BasicPresetWithCNI(cc.components, cc.interactiveSelectedCNI)
+	selectedCNIs := listgenerator.SelectedCNISet(cc.interactiveSelectedCNI)
+	var basicIDs []string
+	if len(selectedCNIs) > 0 {
+		basicIDs = listgenerator.BasicPresetWithCNIs(cc.components, keysOf(selectedCNIs))
+	} else {
+		basicIDs = listgenerator.BasicPresetWithCNI(cc.components, cc.interactiveSelectedCNI)
+	}
 	// Add Fleet to Basic
 	basicIDs = append(basicIDs, "fleet")
 
@@ -1483,46 +1649,36 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 	for _, img := range basicImgs {
 		shouldExclude := false
 
-		// 1. Filter out OTHER CNIs if a specific CNI was selected
-		if cc.interactiveSelectedCNI != "" && cc.interactiveSelectedCNI != "none" && cc.interactiveSelectedCNI != "cni" {
+		// 1. Filter out OTHER CNIs if specific CNI(s) were selected
+		if len(selectedCNIs) > 0 {
 			isOtherCNI := false
-			// Check if image is in cni_canal, cni_flannel, cni_calico, cni_cilium, or generic cni (but not our selected one)
-			if cc.interactiveSelectedCNI != "cni_canal" {
-				if g := compGroupsForFilter["cni_canal"]; g != nil {
+			// Check if image is in a specific CNI group that was NOT selected
+			for _, cniID := range []string{"cni_canal", "cni_flannel", "cni_calico", "cni_cilium"} {
+				if selectedCNIs[cniID] {
+					continue
+				}
+				if g := compGroupsForFilter[cniID]; g != nil {
 					if g.LinuxImages[img] || g.WindowsImages[img] {
 						isOtherCNI = true
+						break
 					}
 				}
 			}
-			if cc.interactiveSelectedCNI != "cni_flannel" {
-				if g := compGroupsForFilter["cni_flannel"]; g != nil {
+			// Also exclude generic "cni" group images unless the image is in one of
+			// our selected specific CNI groups.
+			if !isOtherCNI {
+				if g := compGroupsForFilter["cni"]; g != nil {
 					if g.LinuxImages[img] || g.WindowsImages[img] {
-						isOtherCNI = true
-					}
-				}
-			}
-			if cc.interactiveSelectedCNI != "cni_calico" {
-				if g := compGroupsForFilter["cni_calico"]; g != nil {
-					if g.LinuxImages[img] || g.WindowsImages[img] {
-						isOtherCNI = true
-					}
-				}
-			}
-			if cc.interactiveSelectedCNI != "cni_cilium" {
-				if g := compGroupsForFilter["cni_cilium"]; g != nil {
-					if g.LinuxImages[img] || g.WindowsImages[img] {
-						isOtherCNI = true
-					}
-				}
-			}
-			// Also exclude generic "cni" group images if a specific CNI was selected
-			// (unless the image is also in our selected CNI group)
-			if g := compGroupsForFilter["cni"]; g != nil {
-				if g.LinuxImages[img] || g.WindowsImages[img] {
-					// Check if it's also in our selected CNI group
-					selectedCNIGroup := compGroupsForFilter[cc.interactiveSelectedCNI]
-					if selectedCNIGroup == nil || (!selectedCNIGroup.LinuxImages[img] && !selectedCNIGroup.WindowsImages[img]) {
-						isOtherCNI = true
+						inSelected := false
+						for cniID := range selectedCNIs {
+							if sg := compGroupsForFilter[cniID]; sg != nil && (sg.LinuxImages[img] || sg.WindowsImages[img]) {
+								inSelected = true
+								break
+							}
+						}
+						if !inSelected {
+							isOtherCNI = true
+						}
 					}
 				}
 			}
@@ -1542,30 +1698,32 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			}
 		}
 
-		// 3. Filter out CNI images by name pattern if a specific CNI was selected
-		// (This catches CNI images that might have distro source tags and bypass component group filtering)
+		// 3. Filter out CNI images by name pattern if specific CNI(s) were selected
+		// (catches CNI images with distro source tags that bypass component filtering)
 		imgLower := strings.ToLower(img)
-		if cc.interactiveSelectedCNI != "" && cc.interactiveSelectedCNI != "none" && cc.interactiveSelectedCNI != "cni" {
-			// Check if image name contains CNI identifiers that don't match the selected CNI
-			if cc.interactiveSelectedCNI == "cni_calico" {
-				// Exclude Canal, Cilium, Flannel
-				if strings.Contains(imgLower, "canal") || strings.Contains(imgLower, "cilium") || strings.Contains(imgLower, "flannel") {
-					shouldExclude = true
+		if len(selectedCNIs) > 0 {
+			// Build the set of CNI name tokens that ARE selected; exclude images
+			// whose name contains a CNI token that is NOT selected.
+			selectedTokens := map[string]bool{}
+			if selectedCNIs["cni_canal"] {
+				selectedTokens["canal"] = true
+			}
+			if selectedCNIs["cni_calico"] {
+				selectedTokens["calico"] = true
+			}
+			if selectedCNIs["cni_cilium"] {
+				selectedTokens["cilium"] = true
+			}
+			if selectedCNIs["cni_flannel"] {
+				selectedTokens["flannel"] = true
+			}
+			for _, tok := range []string{"canal", "calico", "cilium", "flannel"} {
+				if selectedTokens[tok] {
+					continue
 				}
-			} else if cc.interactiveSelectedCNI == "cni_canal" {
-				// Exclude Calico, Cilium, Flannel
-				if strings.Contains(imgLower, "calico") || strings.Contains(imgLower, "cilium") || strings.Contains(imgLower, "flannel") {
+				if strings.Contains(imgLower, tok) {
 					shouldExclude = true
-				}
-			} else if cc.interactiveSelectedCNI == "cni_cilium" {
-				// Exclude Canal, Calico, Flannel
-				if strings.Contains(imgLower, "canal") || strings.Contains(imgLower, "calico") || strings.Contains(imgLower, "flannel") {
-					shouldExclude = true
-				}
-			} else if cc.interactiveSelectedCNI == "cni_flannel" {
-				// Exclude Canal, Calico, Cilium
-				if strings.Contains(imgLower, "canal") || strings.Contains(imgLower, "calico") || strings.Contains(imgLower, "cilium") {
-					shouldExclude = true
+					break
 				}
 			}
 		}
@@ -1597,6 +1755,7 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 		"rancher-turtles",           // CAPI extension for Rancher
 		"system-upgrade-controller", // Manages system upgrades
 		"remotedialer-proxy",        // Proxy for remote dialer connections
+		"cert-manager",              // Prerequisite for Rancher Helm install (TLS)
 	}
 	basicImgSet := make(map[string]bool)
 	for _, img := range basicImgs {
@@ -1687,6 +1846,10 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			basicImageComponent[img] = "Load Balancer / Ingress"
 			continue
 		}
+		if strings.Contains(imgLower, "cert-manager") {
+			basicImageComponent[img] = "Cert Manager"
+			continue
+		}
 		if strings.Contains(imgLower, "rancher/rancher:") {
 			basicImageComponent[img] = "Rancher"
 			continue
@@ -1756,7 +1919,7 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			chartChildren = append(chartChildren, treeNode{
 				Id: "basic_chart_" + ch, Label: chartLabel,
 				Kind: "chart", Count: len(cImgs),
-				Version: ver,
+				Version:  ver,
 				Children: refsToTreeNodes(cImgs),
 			})
 		}
@@ -1765,7 +1928,7 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			Id: id, Label: label + " (" + strconv.Itoa(len(imgs)) + " images, " + strconv.Itoa(len(chartChildren)) + " charts)",
 			Kind: "component", Count: len(imgs),
 			Description: basicComponentDescriptions[label],
-			Children: chartChildren,
+			Children:    chartChildren,
 		}
 	}
 
@@ -1822,6 +1985,11 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			if cg == nil {
 				continue
 			}
+			// Partner and UI plugin charts get their own tree roots below.
+			if cg.Repo == listgenerator.SourceGroupPartnerCharts ||
+				cg.Repo == listgenerator.SourceGroupUIPluginCharts {
+				continue
+			}
 			var imgs []string
 			for img := range cg.LinuxImages {
 				imgs = append(imgs, img)
@@ -1844,8 +2012,9 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 				Kind: "chart", Count: cg.Count(),
 				Version: ver, Category: cg.Category,
 				Description: cg.Description,
-				Children: refsToTreeNodes(imgs),
+				Children:    refsToTreeNodes(imgs),
 			}
+			cc.applyChartMetadata(&chartNode, name)
 
 			// Categorize: Basic charts = ONLY auto-deployed Rancher system charts
 			isBasic := name == "fleet" || name == "fleet-crd" || name == "fleet-agent" || name == "fleet-controller" ||
@@ -1853,7 +2022,8 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 				name == "rancher-provisioning-capi" ||
 				name == "system-upgrade-controller" ||
 				name == "remotedialer-proxy" ||
-				name == "ui-plugin-operator" || name == "ui-plugin-operator-crd"
+				name == "ui-plugin-operator" || name == "ui-plugin-operator-crd" ||
+				name == "cert-manager"
 			if isBasic {
 				if chartNode.Category == "" {
 					chartNode.Category = "system"
@@ -1951,7 +2121,7 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 					Id: "addon_" + cat, Label: categoryNames[cat],
 					Kind: "component", Count: totalImgs,
 					Description: chartCategoryDescriptions[cat],
-					Children: charts,
+					Children:    charts,
 				})
 			}
 		}
@@ -2013,8 +2183,24 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 				Id: "addons", Label: "AddOns",
 				Kind: "component", Count: totalAddonImgs,
 				Description: "Optional Rancher marketplace charts — monitoring, logging, backup, storage, security, and more.",
-				Children: addonSubgroups,
+				Children:    addonSubgroups,
 			})
+		}
+	}
+
+	// Opt-in chart repo roots: Partner Charts and UI Plugins (Step 1 toggles).
+	if cc.includePartnerCharts {
+		if node, ok := cc.buildChartRepoRoot(chartGroups, chartNamesSorted,
+			listgenerator.SourceGroupPartnerCharts, "Partner Charts",
+			"Rancher partner charts (rancher/partner-charts) — third-party applications validated for Rancher."); ok {
+			roots = append(roots, node)
+		}
+	}
+	if cc.includeUIPluginCharts {
+		if node, ok := cc.buildChartRepoRoot(chartGroups, chartNamesSorted,
+			listgenerator.SourceGroupUIPluginCharts, "UI Plugins",
+			"Rancher UI plugin charts (rancher/ui-plugin-charts) — dashboard extensions."); ok {
+			roots = append(roots, node)
 		}
 	}
 
@@ -2023,7 +2209,7 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 		Id: "basic", Label: "Essentials",
 		Kind: "component", Count: len(basicImgs),
 		Description: "Required images for Rancher, your Kubernetes distro, selected CNI, and ingress/load balancer.",
-		Children: basicChildren,
+		Children:    basicChildren,
 	}}, roots...)
 
 	// Group 3: Application Collection — Charts (from API refs) + Containers subgroup
@@ -2044,6 +2230,17 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 	}
 	hasAppCollCharts := len(cc.appCollectionChartRefs) > 0
 	if hasAppCollCharts || hasAppCollContainers {
+		// Metadata (display name, description, logo, category) by chart/image ref.
+		appByChartRef := make(map[string]appcollection.Application, len(cc.appCollectionApps))
+		appByImageRef := make(map[string]appcollection.Application, len(cc.appCollectionApps))
+		for _, app := range cc.appCollectionApps {
+			if app.ChartRef != "" {
+				appByChartRef[app.ChartRef] = app
+			}
+			if app.ImageRef != "" {
+				appByImageRef[app.ImageRef] = app
+			}
+		}
 		var appCollChartNodes []treeNode
 		for _, ref := range cc.appCollectionChartRefs {
 			// ref is oci://dp.apps.rancher.io/charts/<slug>
@@ -2056,10 +2253,19 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			if label == "" {
 				label = ref
 			}
-			appCollChartNodes = append(appCollChartNodes, treeNode{
+			node := treeNode{
 				Id: ref, Label: label,
 				Kind: "chart", Count: 0, Children: nil,
-			})
+			}
+			if app, ok := appByChartRef[ref]; ok {
+				if app.Name != "" {
+					node.Label = app.Name
+				}
+				node.Description = app.Description
+				node.Category = app.Category
+				node.IconURL = app.LogoURL
+			}
+			appCollChartNodes = append(appCollChartNodes, node)
 		}
 		sort.Slice(appCollChartNodes, func(i, j int) bool { return appCollChartNodes[i].Label < appCollChartNodes[j].Label })
 		totalCharts := len(appCollChartNodes)
@@ -2071,9 +2277,17 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			})
 		}
 		if len(containerOnlyImgs) > 0 {
+			containerNodes := refsToTreeNodes(containerOnlyImgs)
+			for i := range containerNodes {
+				if app, ok := appByImageRef[containerNodes[i].Id]; ok {
+					containerNodes[i].Description = app.Description
+					containerNodes[i].Category = app.Category
+					containerNodes[i].IconURL = app.LogoURL
+				}
+			}
 			appCollChildren = append(appCollChildren, treeNode{
 				Id: listgenerator.SourceGroupAppCollectionContainers, Label: "Container Images (" + strconv.Itoa(len(containerOnlyImgs)) + ")",
-				Kind: "component", Count: len(containerOnlyImgs), Children: refsToTreeNodes(containerOnlyImgs),
+				Kind: "component", Count: len(containerOnlyImgs), Children: containerNodes,
 			})
 		}
 		totalAppColl := totalCharts + len(containerOnlyImgs)
@@ -2263,6 +2477,11 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 	if len(versParts) > 0 {
 		pastStep2 += "; " + strings.Join(versParts, " ")
 	}
+	arch := cc.targetArch
+	if arch == "" {
+		arch = "amd64"
+	}
+	pastStep2 += "; arch: linux/" + arch
 	pastSelection = step1Str + "  →  " + pastStep2
 	return roots, basicChartsForPreview, fleetChartsForPreview, cniChartsForPreview, basicImageComponent, pastSelection
 }
@@ -2297,6 +2516,15 @@ func imageRefsFromMaps(linux, windows map[string]map[string]bool) []string {
 	}
 	for img := range windows {
 		out = append(out, img)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func keysOf(m map[string]bool) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
 	}
 	sort.Strings(out)
 	return out
@@ -2424,6 +2652,7 @@ func (cc *genesisCmd) prepareGenerator() error {
 	option := &listgenerator.GeneratorOption{
 		RancherVersion: cc.rancherVersion,
 		MinKubeVersion: "",
+		LinuxArch:      cc.targetArch,
 		ChartsPaths:    make(map[string]chartimages.ChartRepoType),
 		ChartURLs: make(map[string]struct {
 			Type   chartimages.ChartRepoType
@@ -2496,25 +2725,41 @@ func (cc *genesisCmd) prepareGenerator() error {
 	}
 	dev := cc.dev
 	if cc.kdm == "" && len(charts) == 0 && len(systemCharts) == 0 {
-		if dev {
-			logrus.Info("Using branch: dev")
-		} else {
-			logrus.Info("Using branch: release")
+		if cc.isRPMGC || cc.includeCommunityImageLists {
+			if dev {
+				logrus.Info("Using branch: dev")
+			} else {
+				logrus.Info("Using branch: release")
+			}
+			addRancherPrimeCharts(cc.rancherVersion, option, dev)
+			addRancherPrimeSystemCharts(cc.rancherVersion, option, dev)
+			addRancherPrimeKontainerDriverMetadata(cc.rancherVersion, option, dev)
 		}
-		if cc.isRPMGC {
-			// Rancher Prime: use Prime Registry image lists (prime.ribs.rancher.io) for K3s, RKE2, and rancher-images.txt.
-			logrus.Debugf("Add Rancher Prime charts & KDM; image lists from %s", PrimeImageListBaseURL)
+		usePrimeLists := cc.isRPMGC
+		useCommunityLists := cc.includeCommunityImageLists
+		if !usePrimeLists && !useCommunityLists {
+			useCommunityLists = true
+		}
+		if usePrimeLists {
+			logrus.Debugf("Image lists: Rancher Prime Registry (%s)", PrimeImageListBaseURL)
 			option.ImageListBaseURL = PrimeImageListBaseURL
-			addRancherPrimeCharts(cc.rancherVersion, option, dev)
-			addRancherPrimeSystemCharts(cc.rancherVersion, option, dev)
-			addRancherPrimeKontainerDriverMetadata(cc.rancherVersion, option, dev)
-		} else {
-			// Community: charts from GitHub (rancher/charts), KDM from releases.rancher.com
-			logrus.Debugf("Add Community charts & KDM (GitHub, releases.rancher.com)")
-			addRancherPrimeCharts(cc.rancherVersion, option, dev)
-			addRancherPrimeSystemCharts(cc.rancherVersion, option, dev)
-			addRancherPrimeKontainerDriverMetadata(cc.rancherVersion, option, dev)
 		}
+		if useCommunityLists {
+			logrus.Debugf("Image lists: Community GitHub releases (k3s/rke2/rancher-images.txt)")
+			// When Prime is also enabled, K3s/RKE2 still come from prime.ribs; this adds
+			// rancher-images.txt from GitHub (with prime.ribs fallback on 404).
+			option.RancherImagesTxtURL = GetRancherImagesTxtURL(cc.rancherVersion)
+		}
+	}
+
+	// Opt-in extra chart repos (Step 1 toggles / flags)
+	if cc.includePartnerCharts {
+		logrus.Debugf("Add Rancher partner charts (rancher/partner-charts)")
+		addRancherPartnerCharts(option)
+	}
+	if cc.includeUIPluginCharts {
+		logrus.Debugf("Add Rancher UI plugin charts (rancher/ui-plugin-charts)")
+		addRancherUIPluginCharts(option)
 	}
 
 	// Live-fetch Application Collection (charts + container images) when enabled
@@ -2527,13 +2772,23 @@ func (cc *genesisCmd) prepareGenerator() error {
 		if pass == "" {
 			pass = os.Getenv("RANCHER_APPS_API_PASSWORD")
 		}
-		chartRefs, imageRefs, err := appcollection.FetchApplications(signalContext, user, pass)
+		apps, err := appcollection.FetchApplicationsMetadata(signalContext, user, pass)
 		if err != nil {
 			return fmt.Errorf("fetch Application Collection: %w (set RANCHER_APPS_API_USER and RANCHER_APPS_API_PASSWORD for auth)", err)
+		}
+		var chartRefs, imageRefs []string
+		for _, app := range apps {
+			switch app.Type {
+			case appcollection.TypeHelmChart:
+				chartRefs = append(chartRefs, app.ChartRef)
+			case appcollection.TypeSingleContainer:
+				imageRefs = append(imageRefs, app.ImageRef)
+			}
 		}
 		option.AppCollectionCharts = chartRefs
 		option.AppCollectionImages = imageRefs
 		cc.appCollectionChartRefs = chartRefs
+		cc.appCollectionApps = apps
 		logrus.Infof("Application Collection: %d charts, %d container images (helm registry login %s for OCI chart pull)", len(chartRefs), len(imageRefs), appcollection.ChartsRegistry)
 	}
 
@@ -2556,6 +2811,7 @@ func (cc *genesisCmd) prepareGenerator() error {
 			logrus.Infof("Min RKE1 Version for Rancher [%v]: %v", cc.rancherVersion, option.MinKubeVersion)
 		}
 	}
+	option.OnProgress = GenesisProgressCallback
 	g, err := listgenerator.NewGenerator(option)
 	if err != nil {
 		return err
@@ -2647,22 +2903,29 @@ func (cc *genesisCmd) applyComponentFilters(option *listgenerator.GeneratorOptio
 
 func (cc *genesisCmd) run(ctx context.Context) error {
 	err := cc.generator.Run(ctx)
+	if err == nil && cc.includeCertManager && cc.generator != nil {
+		listgenerator.MergeCertManagerImages(cc.generator.LinuxImages, listgenerator.DefaultCertManagerVersion)
+		logrus.Infof("Included cert-manager %s images (Rancher Helm install prerequisite)", listgenerator.DefaultCertManagerVersion)
+	}
 
-	// Cleanup cache (if exists) after generate image list.
-	cacheDir := filepath.Join(utils.HangarCacheDir(), utils.CacheCloneRepoDirectory)
-	if err1 := os.RemoveAll(cacheDir); err1 != nil {
-		logrus.Warnf("Failed to delete %q: %v", cacheDir, err1)
+	// Cleanup cache (if exists) after generate image list. Serve mode keeps
+	// the cache during the request, then handleGenerate cleans up on success.
+	if !cc.keepChartCache {
+		cleanupChartCloneCache()
 	}
 	return err
+}
+
+func cleanupChartCloneCache() {
+	cacheDir := filepath.Join(utils.HangarCacheDir(), utils.CacheCloneRepoDirectory)
+	if err := os.RemoveAll(cacheDir); err != nil && !os.IsNotExist(err) {
+		logrus.Warnf("Failed to delete %q: %v", cacheDir, err)
+	}
 }
 
 func (cc *genesisCmd) finish() error {
 	totalLinux := len(cc.generator.LinuxImages)
 	totalWindows := len(cc.generator.WindowsImages)
-	// Apply selection filtering whenever a selection was made, regardless of
-	// interactive mode. Config-file mode and the API export path set these
-	// selections but run with interactive=false; without this the exported
-	// list would ignore the user's group/chart selection and dump every image.
 	// Apply selection filtering whenever a selection was made, regardless of
 	// interactive mode. Config-file mode and the API export path set these
 	// selections but run with interactive=false; without this the exported
@@ -3043,6 +3306,14 @@ func (cc *genesisCmd) saveSlice(ctx context.Context, name string, data []string)
 	return nil
 }
 
+// RunScanOptions holds options for RunScanWithOptions (Genesis serve API).
+type RunScanOptions struct {
+	InsecureSkipTLS bool
+	Jobs            int
+	Timeout         time.Duration
+	OnProgress      func(phase string, done, total int)
+}
+
 // RunScanWithOptions runs Trivy vulnerability scan on the given image list using
 // insecure policy and optional TLS skip. Used by the Genesis serve API when no
 // genesisCmd is available (e.g. POST /api/scan).
@@ -3055,11 +3326,17 @@ func RunScanWithOptions(ctx context.Context, images []string, opts RunScanOption
 	}
 	// debug=true so "Start to scan image" etc. appear in server logs for the UI
 	scan.InitTrivyLogOutput(true, false)
+	if opts.OnProgress != nil {
+		opts.OnProgress("Initializing vulnerability scan…", 0, len(images))
+	}
 	if err := scan.InitTrivyDatabase(ctx, scan.DBOptions{
 		CacheDirectory:        utils.TrivyCacheDir(),
 		InsecureSkipTLSVerify: opts.InsecureSkipTLS,
 	}); err != nil {
 		return nil, fmt.Errorf("init trivy database: %w", err)
+	}
+	if opts.OnProgress != nil {
+		opts.OnProgress("Preparing Trivy database…", 0, len(images))
 	}
 	if err := scan.InitScanner(ctx, scan.ScannerOption{
 		Format:                "csv",
@@ -3070,7 +3347,7 @@ func RunScanWithOptions(ctx context.Context, images []string, opts RunScanOption
 		return nil, fmt.Errorf("init scanner: %w", err)
 	}
 	sysCtx := &types.SystemContext{
-		DockerRegistryUserAgent:    utils.DefaultUserAgent(),
+		DockerRegistryUserAgent:     utils.DefaultUserAgent(),
 		DockerInsecureSkipTLSVerify: types.NewOptionalBool(opts.InsecureSkipTLS),
 		OCIInsecureSkipTLSVerify:    opts.InsecureSkipTLS,
 	}
@@ -3081,6 +3358,9 @@ func RunScanWithOptions(ctx context.Context, images []string, opts RunScanOption
 		Transports: make(map[string]signature.PolicyTransportScopes),
 	}
 	report := scan.NewReport()
+	if opts.OnProgress != nil {
+		opts.OnProgress("Scanning container images…", 0, len(images))
+	}
 	s, err := hangar.NewScanner(&hangar.ScannerOpts{
 		CommonOpts: hangar.CommonOpts{
 			Images:              images,
@@ -3094,6 +3374,11 @@ func RunScanWithOptions(ctx context.Context, images []string, opts RunScanOption
 		},
 		Report:   report,
 		Registry: "",
+		OnImageComplete: func(done, total int) {
+			if opts.OnProgress != nil {
+				opts.OnProgress("Scanning container images…", done, total)
+			}
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("new scanner: %w", err)
@@ -3102,13 +3387,6 @@ func RunScanWithOptions(ctx context.Context, images []string, opts RunScanOption
 		return report, err
 	}
 	return report, nil
-}
-
-// RunScanOptions holds options for RunScanWithOptions (Genesis serve API).
-type RunScanOptions struct {
-	InsecureSkipTLS bool
-	Jobs            int
-	Timeout         time.Duration
 }
 
 // runScanForGenerateList runs the vulnerability scanner on the given image list

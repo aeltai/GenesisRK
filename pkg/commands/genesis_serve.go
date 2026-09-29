@@ -82,6 +82,7 @@ func staticCacheControl(path string) string {
 	}
 	if strings.HasPrefix(path, "/docs/") || path == "/openapi.yaml" || path == "/favicon.svg" ||
 		path == "/genesisrk-logo.png" || path == "/favicon.png" || path == "/apple-touch-icon.png" ||
+		strings.HasPrefix(path, "/icons/") ||
 		strings.HasSuffix(path, ".yaml") || strings.HasSuffix(path, ".gif") {
 		return "public, max-age=86400"
 	}
@@ -121,6 +122,10 @@ const genesisSwaggerHTML = `<!DOCTYPE html>
 </html>`
 
 type genesisJob struct {
+	// mu serializes exports for this job: handleExport mutates shared cc fields
+	// (selections, output paths, generator image maps) that must not be
+	// written by two requests concurrently.
+	mu                  sync.Mutex
 	cc                  *genesisCmd
 	created             time.Time
 	roots               []treeNode
@@ -145,12 +150,18 @@ const (
 )
 
 type scanJob struct {
-	ID       string
-	Status   string     // "running", "completed", "failed"
-	Report   *scan.Report
-	Error    string
-	Created  time.Time
-	done     chan struct{}
+	ID      string
+	Status  string // "running", "completed", "failed"
+	Report  *scan.Report
+	Error   string
+	Created time.Time
+	done    chan struct{}
+
+	TotalImages     int
+	Scanned         int
+	ProgressPhase   string
+	ProgressPercent int
+	progressMu      sync.Mutex
 }
 
 var (
@@ -176,6 +187,12 @@ func (b *genesisLogBuffer) add(line string) {
 	}
 }
 
+func (b *genesisLogBuffer) clear() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lines = nil
+}
+
 func (b *genesisLogBuffer) copy() []string {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -194,11 +211,8 @@ func (genesisLogHook) Levels() []logrus.Level {
 }
 
 func (genesisLogHook) Fire(e *logrus.Entry) error {
-	msg, err := e.String()
-	if err != nil {
-		msg = e.Message
-	}
-	genesisLogBuf.add(msg)
+	ts := e.Time.Format("15:04:05")
+	genesisLogBuf.add(fmt.Sprintf("[%s] %s: %s", ts, e.Level.String(), e.Message))
 	return nil
 }
 
@@ -234,6 +248,7 @@ type TreeNodeJSON struct {
 	Description string         `json:"description,omitempty"`
 	Version     string         `json:"version,omitempty"`
 	Category    string         `json:"category,omitempty"`
+	IconURL     string         `json:"iconUrl,omitempty"`
 	Children    []TreeNodeJSON `json:"children,omitempty"`
 }
 
@@ -241,6 +256,7 @@ func treeNodeToJSON(n treeNode) TreeNodeJSON {
 	out := TreeNodeJSON{
 		ID: n.Id, Label: n.Label, Kind: n.Kind, Count: n.Count,
 		Description: n.Description, Version: n.Version, Category: n.Category,
+		IconURL: n.IconURL,
 	}
 	if len(n.Children) > 0 {
 		out.Children = make([]TreeNodeJSON, 0, len(n.Children))
@@ -279,14 +295,20 @@ type Step1DetailsJSON struct {
 // GenerateRequest is the request body for POST /api/generate.
 // If RancherVersions has multiple entries, the backend runs the generator for each and merges image lists.
 type GenerateRequest struct {
-	RancherVersion             string   `json:"rancherVersion"`             // single version (used when RancherVersions is empty)
-	RancherVersions            []string `json:"rancherVersions,omitempty"`  // multiple versions: generate for each and merge
+	RancherVersion             string   `json:"rancherVersion"`            // single version (used when RancherVersions is empty)
+	RancherVersions            []string `json:"rancherVersions,omitempty"` // multiple versions: generate for each and merge
 	IsRPMGC                    bool     `json:"isRPMGC"`
+	IncludeCommunityImageLists bool     `json:"includeCommunityImageLists"`
 	IncludeAppCollectionCharts bool     `json:"includeAppCollectionCharts"`
+	IncludePartnerCharts       bool     `json:"includePartnerCharts"`
+	IncludeUIPluginCharts      bool     `json:"includeUIPluginCharts"`
+	IncludeCertManager         *bool    `json:"includeCertManager,omitempty"` // nil/omitted = true (Rancher Helm prerequisite)
 	AppCollectionAPIUser       string   `json:"appCollectionAPIUser"`
 	AppCollectionAPIPassword   string   `json:"appCollectionAPIPassword"`
 	Distros                    []string `json:"distros"`
 	CNI                        string   `json:"cni"`
+	CNIs                       []string `json:"cnis,omitempty"` // multiple CNIs (both distros); takes precedence over CNI
+	Arch                       string   `json:"arch,omitempty"` // target architecture for size/availability (default amd64)
 	LoadBalancer               bool     `json:"loadBalancer"`
 	LBK3sKlipper               bool     `json:"lbK3sKlipper"`
 	LBK3sTraefik               bool     `json:"lbK3sTraefik"`
@@ -296,6 +318,8 @@ type GenerateRequest struct {
 	K3sVersions                string   `json:"k3sVersions"`
 	RKE2Versions               string   `json:"rke2Versions"`
 	RKEVersions                string   `json:"rkeVersions"`
+	// IncludeDeprecatedPatches lists every KDM patch per minor (kdmRemoveDeprecated=false).
+	IncludeDeprecatedPatches bool `json:"includeDeprecatedPatches"`
 }
 
 // GenerateResponse is the response for POST /api/generate.
@@ -373,14 +397,17 @@ func newGenesisServeCmd(parent *genesisCmd) {
 			// Register API routes first so they take precedence over static "/" (important for Go < 1.22)
 			mux.HandleFunc("/api/rancher-versions", handleRancherVersions)
 			mux.HandleFunc("/api/step1-options", handleStep1Options)
-			mux.HandleFunc("/api/generate", handleGenerate)
-			mux.HandleFunc("/api/export", handleExport)
-			mux.HandleFunc("/api/check-availability", handleCheckAvailability)
+		mux.HandleFunc("/api/generate", handleGenerate)
+		mux.HandleFunc("/api/export", handleExport)
+		mux.HandleFunc("/api/check-availability", handleCheckAvailability)
+		mux.HandleFunc("/api/image-sizes", handleImageSizes)
 			mux.HandleFunc("/api/scan", handleScan)
 			mux.HandleFunc("/api/scan/status/{id}", handleScanStatus)
 			mux.HandleFunc("/api/scan/report/{id}", handleScanReport)
 			mux.HandleFunc("/api/release-notes", handleReleaseNotes)
+			mux.HandleFunc("/api/endoflife/", handleEndOfLifeProduct)
 			mux.HandleFunc("/api/logs", handleLogs)
+			mux.HandleFunc("/api/progress", handleProgress)
 			mux.HandleFunc("/api/openapi.yaml", handleOpenAPISpec)
 			mux.HandleFunc("/api/openapi", handleOpenAPISpec)
 			mux.HandleFunc("/api/docs", handleSwaggerUI)
@@ -449,64 +476,17 @@ func handleRancherVersions(w http.ResponseWriter, r *http.Request) {
 		writeCachedJSON(w, body, rancherVersionsCacheTTL)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
 	defer cancel()
-	apiURL := "https://api.github.com/repos/rancher/rancher/releases?per_page=100"
-	ghReq, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
-	if err != nil {
-		writeErr(w, http.StatusInternalServerError, "request: "+err.Error())
-		return
-	}
-	ghReq.Header.Set("Accept", "application/vnd.github.v3+json")
-	if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
-		ghReq.Header.Set("Authorization", "Bearer "+tok)
-	}
-	resp, err := http.DefaultClient.Do(ghReq)
+	versions, err := fetchGitHubRancherReleases(ctx, includeRC)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "fetch: "+err.Error())
 		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		writeErr(w, http.StatusBadGateway, "GitHub API: "+resp.Status+" "+string(body))
-		return
-	}
-	var releases []struct {
-		TagName     string `json:"tag_name"`
-		Prerelease  bool   `json:"prerelease"`
-		Draft       bool   `json:"draft"`
-		PublishedAt string `json:"published_at"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
-		writeErr(w, http.StatusInternalServerError, "decode: "+err.Error())
-		return
-	}
-	type versionInfo struct {
-		Version string `json:"version"`
-		Date    string `json:"date"`
-	}
-	var versions []versionInfo
-	for _, rel := range releases {
-		if rel.Draft {
-			continue
-		}
-		name := strings.TrimSpace(rel.TagName)
-		if !strings.HasPrefix(name, "v") || !semver.IsValid(name) {
-			continue
-		}
-		if !includeRC && (rel.Prerelease || isPreRelease(name)) {
-			continue
-		}
-		date := ""
-		if rel.PublishedAt != "" {
-			if t, err := time.Parse(time.RFC3339, rel.PublishedAt); err == nil {
-				date = t.Format("2006-01-02")
-			}
-		}
-		versions = append(versions, versionInfo{Version: name, Date: date})
-	}
-	sort.Slice(versions, func(i, j int) bool { return semver.Compare(versions[i].Version, versions[j].Version) > 0 })
+	annotatePrimeAvailability(ctx, versions)
+	sort.Slice(versions, func(i, j int) bool {
+		return semver.Compare(versions[i].Version, versions[j].Version) > 0
+	})
 	body, err := json.Marshal(map[string]interface{}{"versions": versions})
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "encode: "+err.Error())
@@ -516,6 +496,115 @@ func handleRancherVersions(w http.ResponseWriter, r *http.Request) {
 	writeCachedJSON(w, body, rancherVersionsCacheTTL)
 }
 
+func fetchGitHubRancherReleases(ctx context.Context, includeRC bool) ([]rancherVersionInfo, error) {
+	seen := make(map[string]bool)
+	var versions []rancherVersionInfo
+	for page := 1; page <= githubRancherReleasesMaxPages; page++ {
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		apiURL := fmt.Sprintf(
+			"https://api.github.com/repos/rancher/rancher/releases?per_page=100&page=%d", page)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, apiURL, nil)
+		if err != nil {
+			return nil, err
+		}
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+		if tok := os.Getenv("GITHUB_TOKEN"); tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		if resp.StatusCode != http.StatusOK {
+			body, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			return nil, fmt.Errorf("GitHub API: %s %s", resp.Status, string(body))
+		}
+		var releases []githubRelease
+		if err := json.NewDecoder(resp.Body).Decode(&releases); err != nil {
+			resp.Body.Close()
+			return nil, err
+		}
+		resp.Body.Close()
+		if len(releases) == 0 {
+			break
+		}
+		for _, rel := range releases {
+			if rel.Draft {
+				continue
+			}
+			name := strings.TrimSpace(rel.TagName)
+			if !strings.HasPrefix(name, "v") || !semver.IsValid(name) {
+				continue
+			}
+			if !includeRC && (rel.Prerelease || isPreRelease(name)) {
+				continue
+			}
+			if seen[name] {
+				continue
+			}
+			seen[name] = true
+			date := ""
+			if rel.PublishedAt != "" {
+				if t, err := time.Parse(time.RFC3339, rel.PublishedAt); err == nil {
+					date = t.Format("2006-01-02")
+				}
+			}
+			versions = append(versions, rancherVersionInfo{
+				Version:            name,
+				Date:               date,
+				CommunityAvailable: true,
+			})
+		}
+		if len(releases) < 100 {
+			break
+		}
+	}
+	return versions, nil
+}
+
+func annotatePrimeAvailability(ctx context.Context, versions []rancherVersionInfo) {
+	if len(versions) == 0 {
+		return
+	}
+	sem := make(chan struct{}, primeProbeConcurrency)
+	var wg sync.WaitGroup
+	for i := range versions {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			versions[idx].PrimeAvailable = probePrimeAvailable(ctx, versions[idx].Version)
+		}(i)
+	}
+	wg.Wait()
+}
+
+func probePrimeAvailable(ctx context.Context, version string) bool {
+	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	link := GetPrimeRancherImagesTxtURL(version)
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, link, nil)
+	if err != nil {
+		return false
+	}
+	client := &http.Client{
+		Timeout: 4 * time.Second,
+		Transport: &http.Transport{
+			Proxy: http.ProxyFromEnvironment,
+		},
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
+}
+
 func handleLogs(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "GET only")
@@ -523,6 +612,14 @@ func handleLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	lines := genesisLogBuf.copy()
 	writeJSON(w, http.StatusOK, map[string]interface{}{"lines": lines})
+}
+
+func handleProgress(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	writeJSON(w, http.StatusOK, genesisProgress.Snapshot())
 }
 
 func handleOpenAPISpec(w http.ResponseWriter, r *http.Request) {
@@ -567,10 +664,11 @@ func handleStep1Options(w http.ResponseWriter, r *http.Request) {
 	}
 	includeRC := r.URL.Query().Get("includeRC") == "true"
 	includeGitHubVersions := r.URL.Query().Get("includeGitHubVersions") == "true"
+	includeDeprecatedPatches := r.URL.Query().Get("includeDeprecatedPatches") == "true"
 	if !strings.HasPrefix(rancherVersion, "v") {
 		rancherVersion = "v" + rancherVersion
 	}
-	cacheKey := fmt.Sprintf("step1-options:%s:rc=%t:gh=%t", rancherVersion, includeRC, includeGitHubVersions)
+	cacheKey := fmt.Sprintf("step1-options:%s:rc=%t:gh=%t:dep=%t", rancherVersion, includeRC, includeGitHubVersions, includeDeprecatedPatches)
 	if body, ok := genesisAPICache.get(cacheKey); ok {
 		writeCachedJSON(w, body, step1OptionsCacheTTL)
 		return
@@ -578,7 +676,7 @@ func handleStep1Options(w http.ResponseWriter, r *http.Request) {
 	cc := &genesisCmd{genesisOpts: &genesisOpts{
 		rancherVersion:      rancherVersion,
 		dev:                 isPreRelease(rancherVersion),
-		kdmRemoveDeprecated: true,
+		kdmRemoveDeprecated: !includeDeprecatedPatches,
 	}}
 	if err := cc.setupFlags(); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -620,7 +718,7 @@ func handleStep1Options(w http.ResponseWriter, r *http.Request) {
 	}
 	details := Step1DetailsJSON{
 		KDMURL:          GetKDMURLForDisplay(cc.rancherVersion, cc.isRPMGC, cc.genesisOpts.dev),
-		ImageListSource: GetImageListSourceForDisplay(cc.isRPMGC),
+		ImageListSource: GetImageListSourceForDisplay(cc.includeCommunityImageLists, cc.isRPMGC),
 	}
 	if includeGitHubVersions {
 		mergeGitHubVersions(r.Context(), capJSON, includeRC)
@@ -642,10 +740,23 @@ func handleStep1Options(w http.ResponseWriter, r *http.Request) {
 
 // githubRelease is a minimal struct for GitHub releases API.
 type githubRelease struct {
-	TagName    string `json:"tag_name"`
-	Prerelease bool   `json:"prerelease"`
-	Draft      bool   `json:"draft"`
+	TagName     string `json:"tag_name"`
+	Prerelease  bool   `json:"prerelease"`
+	Draft       bool   `json:"draft"`
+	PublishedAt string `json:"published_at"`
 }
+
+type rancherVersionInfo struct {
+	Version            string `json:"version"`
+	Date               string `json:"date"`
+	CommunityAvailable bool   `json:"communityAvailable"`
+	PrimeAvailable     bool   `json:"primeAvailable"`
+}
+
+const (
+	githubRancherReleasesMaxPages = 15
+	primeProbeConcurrency         = 16
+)
 
 // mergeGitHubVersions fetches recent stable (and optionally RC) releases from
 // K3s/RKE2 GitHub and merges them into the capabilities map. Versions already
@@ -761,6 +872,9 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, "rancherVersion or rancherVersions required")
 		return
 	}
+	logrus.Infof("Generating image tree for Rancher %s", strings.Join(versions, ", "))
+	genesisProgress.BeginGenerate(len(versions))
+	defer genesisProgress.End()
 	// Normalize version strings
 	for i := range versions {
 		if !strings.HasPrefix(versions[i], "v") {
@@ -771,16 +885,33 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 	var firstCC *genesisCmd
 	var mergedLinux, mergedWindows map[string]map[string]bool
 
-	for _, rv := range versions {
+	for i, rv := range versions {
+		genesisProgress.SetVersionIndex(i)
 		cc := newGenesisCmd()
 		cc.genesisOpts.rancherVersion = rv
 		cc.genesisOpts.dev = isPreRelease(rv)
 		cc.isRPMGC = req.IsRPMGC
+		cc.includeCommunityImageLists = req.IncludeCommunityImageLists
+		if !cc.isRPMGC && !cc.includeCommunityImageLists {
+			cc.includeCommunityImageLists = true
+		}
 		cc.includeAppCollectionCharts = req.IncludeAppCollectionCharts
+		cc.includePartnerCharts = req.IncludePartnerCharts
+		cc.includeUIPluginCharts = req.IncludeUIPluginCharts
+		cc.includeCertManager = true
+		if req.IncludeCertManager != nil {
+			cc.includeCertManager = *req.IncludeCertManager
+		}
+		cc.keepChartCache = true // serve mode: reuse chart clones across generate requests
 		cc.appCollectionAPIUser = req.AppCollectionAPIUser
 		cc.appCollectionAPIPassword = req.AppCollectionAPIPassword
 		cc.genesisOpts.components = strings.Join(req.Distros, ",")
-		cc.genesisOpts.interactiveSelectedCNI = req.CNI
+		// Multiple CNIs (both distros) take precedence over the single CNI string.
+		if len(req.CNIs) > 0 {
+			cc.genesisOpts.interactiveSelectedCNI = strings.Join(req.CNIs, ",")
+		} else {
+			cc.genesisOpts.interactiveSelectedCNI = req.CNI
+		}
 		cc.genesisOpts.interactiveIncludeLB = req.LoadBalancer
 		cc.genesisOpts.interactiveLBK3sKlipper = req.LBK3sKlipper
 		cc.genesisOpts.interactiveLBK3sTraefik = req.LBK3sTraefik
@@ -790,6 +921,8 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		cc.genesisOpts.k3sVersions = req.K3sVersions
 		cc.genesisOpts.rke2Versions = req.RKE2Versions
 		cc.genesisOpts.rkeVersions = req.RKEVersions
+		cc.kdmRemoveDeprecated = !req.IncludeDeprecatedPatches
+		cc.genesisOpts.targetArch = kdmimages.NormalizeLinuxArch(req.Arch)
 		cc.genesisOpts.interactive = false
 		cc.genesisOpts.configFile = ""
 
@@ -838,7 +971,10 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		firstCC.genesisOpts.rancherVersion = versions[0] + " + " + strings.Join(versions[1:], ", ")
 	}
 
+	logrus.Info("Building component tree...")
+	genesisProgress.UpdateGenerate("tree", 0, 1, "")
 	roots, basicCharts, _, _, basicImageComponent, pastSelection := firstCC.buildGenesisTree()
+	genesisProgress.UpdateGenerate("tree", 1, 1, "")
 	jobID := uuid.New().String()
 	genesisJobsMu.Lock()
 	genesisJobs[jobID] = &genesisJob{
@@ -852,6 +988,8 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		windowsImagesSnapshot: cloneImageSet(firstCC.generator.WindowsImages),
 	}
 	genesisJobsMu.Unlock()
+	cleanupChartCloneCache()
+	genesisLogBuf.clear()
 	writeJSON(w, http.StatusOK, GenerateResponse{
 		JobID:               jobID,
 		Roots:               treeNodesToJSON(roots),
@@ -878,6 +1016,8 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, "job not found or expired")
 		return
 	}
+	job.mu.Lock()
+	defer job.mu.Unlock()
 	cc := job.cc
 	// Restore the full generated image set before each export so repeated
 	// exports with different selections are idempotent (finish() mutates these).
@@ -886,7 +1026,7 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	cc.interactiveSelectedComponentIDs = req.SelectedComponentIDs
 	cc.interactiveSelectedChartNames = req.ChartNames
 	cc.interactiveSelectedImageRefs = req.SelectedImageRefs
-	cc.autoYes = true // non-interactive: never prompt for overwrite (e.g. *-versions.txt)
+	cc.autoYes = true // non-interactive: never prompt for overwrite
 	dir, err := os.MkdirTemp("", "genesis-export-*")
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, "temp dir: "+err.Error())
@@ -894,6 +1034,10 @@ func handleExport(w http.ResponseWriter, r *http.Request) {
 	}
 	defer os.RemoveAll(dir)
 	cc.output = filepath.Join(dir, "images.txt")
+	// Keep every finish() side-output inside the temp dir; without this the
+	// versions file (default "<rancher-version>-versions.txt") is written to
+	// the server's working directory on every export.
+	cc.outputVersions = filepath.Join(dir, "versions.txt")
 	if cc.interactiveIncludeWindows {
 		cc.outputWindows = filepath.Join(dir, "images-windows.txt")
 	}
@@ -944,10 +1088,13 @@ func handleScan(w http.ResponseWriter, r *http.Request) {
 	}
 	scanJobID := uuid.New().String()
 	job := &scanJob{
-		ID:      scanJobID,
-		Status:  "running",
-		Created: time.Now(),
-		done:    make(chan struct{}),
+		ID:              scanJobID,
+		Status:          "running",
+		Created:         time.Now(),
+		done:            make(chan struct{}),
+		TotalImages:     len(req.Images),
+		ProgressPhase:   "Initializing vulnerability scan…",
+		ProgressPercent: 5,
 	}
 	scanJobsMu.Lock()
 	scanJobs[scanJobID] = job
@@ -959,10 +1106,40 @@ func handleScan(w http.ResponseWriter, r *http.Request) {
 		defer close(job.done)
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Minute)
 		defer cancel()
+		updateScanJobProgress := func(phase string, done, total int) {
+			scanJobsMu.Lock()
+			defer scanJobsMu.Unlock()
+			job.progressMu.Lock()
+			job.ProgressPhase = phase
+			job.Scanned = done
+			if total > 0 {
+				job.TotalImages = total
+			}
+			switch phase {
+			case "Initializing vulnerability scan…":
+				job.ProgressPercent = 5
+			case "Preparing Trivy database…":
+				job.ProgressPercent = 12
+			case "Scan complete":
+				job.ProgressPercent = 100
+			default:
+				totalImages := job.TotalImages
+				if totalImages <= 0 {
+					totalImages = 1
+				}
+				pct := 15 + int(float64(done)/float64(totalImages)*84)
+				if pct > 99 {
+					pct = 99
+				}
+				job.ProgressPercent = pct
+			}
+			job.progressMu.Unlock()
+		}
 		report, err := RunScanWithOptions(ctx, images, RunScanOptions{
 			InsecureSkipTLS: true,
 			Jobs:            2,
 			Timeout:         10 * time.Minute,
+			OnProgress:      updateScanJobProgress,
 		})
 		scanJobsMu.Lock()
 		defer scanJobsMu.Unlock()
@@ -977,6 +1154,7 @@ func handleScan(w http.ResponseWriter, r *http.Request) {
 		}
 		job.Status = "completed"
 		job.Report = report
+		updateScanJobProgress("Scan complete", len(images), len(images))
 		logrus.Infof("Scan completed (job %s)", scanJobID)
 	}()
 	w.Header().Set("Content-Type", "application/json")
@@ -1002,6 +1180,12 @@ func handleScanStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := map[string]interface{}{"status": job.Status}
+	if job.ProgressPhase != "" {
+		resp["phase"] = job.ProgressPhase
+		resp["percent"] = job.ProgressPercent
+		resp["current"] = job.Scanned
+		resp["total"] = job.TotalImages
+	}
 	if job.Error != "" {
 		resp["error"] = job.Error
 	}
@@ -1060,6 +1244,42 @@ func handleScanReport(w http.ResponseWriter, r *http.Request) {
 // handleReleaseNotes fetches release notes (changelog) from the GitHub Releases API.
 // Supports rancher/rancher (Rancher versions), rancher/rke2, and rancher/k3s.
 // GET /api/release-notes?repo=rancher/rancher&tag=v2.13.1
+func handleEndOfLifeProduct(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	product := strings.TrimPrefix(r.URL.Path, "/api/endoflife/")
+	product = strings.Trim(product, "/")
+	if product == "" || strings.Contains(product, "/") {
+		writeErr(w, http.StatusBadRequest, "product slug required")
+		return
+	}
+
+	apiURL := "https://endoflife.date/api/v1/products/" + product
+	client := &http.Client{Timeout: 15 * time.Second}
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, apiURL, nil)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "endoflife.date: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		writeErr(w, http.StatusBadGateway, "endoflife.date: "+err.Error())
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.WriteHeader(resp.StatusCode)
+	_, _ = w.Write(body)
+}
+
 func handleReleaseNotes(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeErr(w, http.StatusMethodNotAllowed, "GET only")
@@ -1192,6 +1412,7 @@ func handleCheckAvailability(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Images []string `json:"images"`
+		Arch   string   `json:"arch"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeErr(w, http.StatusBadRequest, err.Error())
@@ -1200,6 +1421,10 @@ func handleCheckAvailability(w http.ResponseWriter, r *http.Request) {
 	if len(req.Images) == 0 {
 		json.NewEncoder(w).Encode(map[string]interface{}{"results": map[string]interface{}{}})
 		return
+	}
+	arch := strings.TrimSpace(req.Arch)
+	if arch == "" {
+		arch = "amd64"
 	}
 
 	type result struct {
@@ -1220,7 +1445,7 @@ func handleCheckAvailability(w http.ResponseWriter, r *http.Request) {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			status, detail, sizeBytes := checkImageAvailability(image)
+			status, detail, sizeBytes := checkImageAvailability(image, arch)
 			results[idx] = result{img: image, status: status, detail: detail, sizeBytes: sizeBytes}
 		}(i, img)
 	}
@@ -1239,9 +1464,70 @@ func handleCheckAvailability(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"results": out})
 }
 
+// handleImageSizes fetches compressed linux/<arch> sizes for the given images
+// independently of the availability check. Returns {image: {sizeBytes, arch, status, detail}}.
+func handleImageSizes(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeErr(w, http.StatusMethodNotAllowed, "POST only")
+		return
+	}
+	var req struct {
+		Images []string `json:"images"`
+		Arch   string   `json:"arch"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeErr(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if len(req.Images) == 0 {
+		json.NewEncoder(w).Encode(map[string]interface{}{"results": map[string]interface{}{}})
+		return
+	}
+	arch := strings.TrimSpace(req.Arch)
+	if arch == "" {
+		arch = "amd64"
+	}
+
+	type result struct {
+		img       string
+		status    string
+		detail    string
+		sizeBytes int64
+	}
+	results := make([]result, len(req.Images))
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, 20)
+	for i, img := range req.Images {
+		wg.Add(1)
+		go func(idx int, image string) {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			status, detail, sizeBytes := checkImageAvailability(image, arch)
+			results[idx] = result{img: image, status: status, detail: detail, sizeBytes: sizeBytes}
+		}(i, img)
+	}
+	wg.Wait()
+
+	out := make(map[string]interface{})
+	for _, res := range results {
+		entry := map[string]interface{}{"status": res.status}
+		if res.detail != "" {
+			entry["detail"] = res.detail
+		}
+		if res.sizeBytes > 0 {
+			entry["sizeBytes"] = res.sizeBytes
+			entry["arch"] = arch
+		}
+		out[res.img] = entry
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"results": out})
+}
+
 // checkImageAvailability checks if an image exists in its registry using Docker Registry HTTP API v2.
-// When found, sizeBytes is the compressed sum of config + layers (linux/amd64 when manifest list).
-func checkImageAvailability(image string) (status, detail string, sizeBytes int64) {
+// When found, sizeBytes is the compressed sum of config + layers (linux/arch when manifest list).
+func checkImageAvailability(image, arch string) (status, detail string, sizeBytes int64) {
 	registry := "registry-1.docker.io"
 	authService := "registry.docker.io"
 	repo := image
@@ -1295,37 +1581,61 @@ func checkImageAvailability(image string) (status, detail string, sizeBytes int6
 
 	accept := "application/vnd.docker.distribution.manifest.v2+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.oci.image.index.v1+json"
 
-	// HEAD request to check manifest
-	manifestURL := "https://" + registry + "/v2/" + repo + "/manifests/" + tag
-	req, _ := http.NewRequest("HEAD", manifestURL, nil)
-	req.Header.Set("Accept", accept)
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	resp, err := client.Do(req)
+	body, err := registryGET(client, registry, repo, tag, token, accept)
 	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			return "not_found", "image not found in registry", 0
+		}
 		return "error", err.Error(), 0
 	}
-	resp.Body.Close()
-
-	switch resp.StatusCode {
-	case 200:
-		size, sizeErr := fetchRegistryImageSize(client, registry, repo, tag, token, accept)
-		if sizeErr != nil {
-			return "ok", "size unavailable: " + sizeErr.Error(), 0
-		}
-		return "ok", "", size
-	case 401:
-		return "not_found", "unauthorized (image may not exist or requires auth)", 0
-	case 404:
-		return "not_found", "image not found in registry", 0
-	default:
-		return "error", "HTTP " + resp.Status, 0
+	defer body.Close()
+	raw, err := io.ReadAll(io.LimitReader(body, 2<<20))
+	if err != nil {
+		return "error", "read manifest: " + err.Error(), 0
 	}
+
+	if !manifestIndexHasLinuxArch(raw, arch) {
+		return "no_arch", fmt.Sprintf("linux/%s not published for this image", arch), 0
+	}
+
+	size, sizeErr := parseManifestSize(client, registry, repo, token, accept, arch, raw, true)
+	if sizeErr != nil {
+		return "ok", "size unavailable: " + sizeErr.Error(), 0
+	}
+	return "ok", "", size
 }
 
-func fetchRegistryImageSize(client *http.Client, registry, repo, ref, token, accept string) (int64, error) {
+func manifestIndexHasLinuxArch(raw []byte, arch string) bool {
+	var meta struct {
+		MediaType string `json:"mediaType"`
+	}
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		return true
+	}
+	if !strings.Contains(meta.MediaType, "manifest.list") && !strings.Contains(meta.MediaType, "image.index") {
+		// Single-platform manifest: assume available (common for older/single-arch tags).
+		return true
+	}
+	var index struct {
+		Manifests []struct {
+			Platform struct {
+				Architecture string `json:"architecture"`
+				OS           string `json:"os"`
+			} `json:"platform"`
+		} `json:"manifests"`
+	}
+	if err := json.Unmarshal(raw, &index); err != nil {
+		return true
+	}
+	for _, m := range index.Manifests {
+		if m.Platform.OS == "linux" && m.Platform.Architecture == arch {
+			return true
+		}
+	}
+	return false
+}
+
+func fetchRegistryImageSize(client *http.Client, registry, repo, ref, token, accept, arch string) (int64, error) {
 	body, err := registryGET(client, registry, repo, ref, token, accept)
 	if err != nil {
 		return 0, err
@@ -1335,7 +1645,7 @@ func fetchRegistryImageSize(client *http.Client, registry, repo, ref, token, acc
 	if err != nil {
 		return 0, err
 	}
-	return parseManifestSize(client, registry, repo, token, accept, raw)
+	return parseManifestSize(client, registry, repo, token, accept, arch, raw, true)
 }
 
 func registryGET(client *http.Client, registry, repo, ref, token, accept string) (io.ReadCloser, error) {
@@ -1359,7 +1669,7 @@ func registryGET(client *http.Client, registry, repo, ref, token, accept string)
 	return resp.Body, nil
 }
 
-func parseManifestSize(client *http.Client, registry, repo, token, accept string, raw []byte) (int64, error) {
+func parseManifestSize(client *http.Client, registry, repo, token, accept, arch string, raw []byte, strictArch bool) (int64, error) {
 	var meta struct {
 		MediaType string `json:"mediaType"`
 	}
@@ -1381,15 +1691,26 @@ func parseManifestSize(client *http.Client, registry, repo, token, accept string
 		}
 		digest := ""
 		for _, m := range index.Manifests {
-			if m.Platform.OS == "linux" && m.Platform.Architecture == "amd64" {
+			if m.Platform.OS == "linux" && m.Platform.Architecture == arch {
 				digest = m.Digest
 				break
 			}
 		}
-		if digest == "" && len(index.Manifests) > 0 {
+		if digest == "" && !strictArch {
+			for _, m := range index.Manifests {
+				if m.Platform.OS == "linux" && m.Platform.Architecture == "amd64" {
+					digest = m.Digest
+					break
+				}
+			}
+		}
+		if digest == "" && !strictArch && len(index.Manifests) > 0 {
 			digest = index.Manifests[0].Digest
 		}
 		if digest == "" {
+			if strictArch {
+				return 0, fmt.Errorf("linux/%s not in manifest index", arch)
+			}
 			return 0, fmt.Errorf("empty manifest index")
 		}
 		body, err := registryGET(client, registry, repo, digest, token, accept)

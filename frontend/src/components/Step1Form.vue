@@ -6,6 +6,14 @@ import LoadingShapes from './LoadingShapes.vue'
 import { CNI_CATALOG, githubRelease, k3sRelease, rke2Release, rancherRelease, LOAD_BALANCER_OPTIONS, cniIconUrl, type LoadBalancerOption } from '../utils/componentLinks'
 import { brandIcon } from '../utils/brandIcons'
 import {
+  rancherEditionIcon,
+  rancherEditionAvailability,
+  rancherEditionAvailabilityLabel,
+  rancherEditionAvailabilityHint,
+  rancherEditionAvailabilityShort,
+  type RancherEditionAvailability,
+} from '../utils/rancherBrandIcons'
+import {
   annotateDistroVersions,
   annotateRancherVersions,
   lifecycleStatusLabel,
@@ -27,22 +35,30 @@ defineEmits<{
 const rancherVersion = defineModel<string>('rancherVersion', { default: '' })
 const rancherVersions = defineModel<string[]>('rancherVersions', { default: () => [] })
 const isRPMGC = defineModel<boolean>('isRPMGC', { default: false })
+const includeCommunityImageLists = defineModel<boolean>('includeCommunityImageLists', { default: true })
 const includeAppCollection = defineModel<boolean>('includeAppCollection', { default: false })
+const includePartnerCharts = defineModel<boolean>('includePartnerCharts', { default: false })
+const includeUIPluginCharts = defineModel<boolean>('includeUIPluginCharts', { default: false })
+const includeCertManager = defineModel<boolean>('includeCertManager', { default: true })
 const appUser = defineModel<string>('appUser', { default: '' })
 const appPassword = defineModel<string>('appPassword', { default: '' })
 const distros = defineModel<string[]>('distros', { default: () => ['rke2'] })
 const cni = defineModel<string>('cni', { default: 'cni_calico' })
+const arch = defineModel<string>('arch', { default: 'amd64' })
 const lbK3sKlipper = defineModel<boolean>('lbK3sKlipper', { default: false })
 const lbK3sTraefik = defineModel<boolean>('lbK3sTraefik', { default: false })
 const lbRKE2Nginx = defineModel<boolean>('lbRKE2Nginx', { default: true })
 const lbRKE2Traefik = defineModel<boolean>('lbRKE2Traefik', { default: false })
 const includeRC = defineModel<boolean>('includeRC', { default: false })
 const includeGitHubVersions = defineModel<boolean>('includeGitHubVersions', { default: false })
+const includeDeprecatedPatches = defineModel<boolean>('includeDeprecatedPatches', { default: false })
 const includeWindows = defineModel<boolean>('includeWindows', { default: false })
 const k3sVersions = defineModel<string[]>('k3sVersions', { default: () => [] })
 const rke2Versions = defineModel<string[]>('rke2Versions', { default: () => [] })
 
-// CNI options by distro: K3s default is Flannel; RKE2 defaults to Canal and supports Calico, Cilium, Flannel
+// CNI options by distro. The backend only offers Flannel for K3s
+// ("Flannel is only available for K3s"); Canal/Calico/Cilium are available for both.
+// K3s default is Flannel; RKE2 default is Canal.
 const cniOptions = computed(() => {
   const d = distros.value
   const hasK3s = d.includes('k3s')
@@ -61,15 +77,16 @@ const cniOptions = computed(() => {
     ]
   }
   if (onlyRKE2) {
+    // Flannel is not offered for RKE2-only clusters.
     return [
       { id: 'cni_canal', label: 'Canal', hint: 'RKE2 default' },
       { id: 'cni_calico', label: 'Calico' },
       { id: 'cni_cilium', label: 'Cilium' },
-      { id: 'cni_flannel', label: 'Flannel' },
       { id: 'cni', label: 'All CNI' },
       { id: '', label: 'None' },
     ]
   }
+  // Both distros selected: Flannel is available because K3s is selected.
   const base: { id: string; label: string; hint?: string }[] = []
   if (hasK3s) base.push({ id: 'cni_flannel', label: 'Flannel', hint: 'K3s default' })
   if (hasRKE2) base.push({ id: 'cni_canal', label: 'Canal', hint: 'RKE2 default' })
@@ -86,8 +103,40 @@ const cniCards = computed(() =>
   }))
 )
 
+// CNI is multi-select only when BOTH K3s and RKE2 are selected (Flannel is K3s-only;
+// Canal/Calico/Cilium apply to RKE2). With a single distro it stays single-select.
+const cniMulti = computed(() => distros.value.length === 2)
+
+const cniSelectedSet = computed(() => {
+  const s = new Set<string>()
+  for (const part of (cni.value || '').split(',')) {
+    if (part) s.add(part)
+  }
+  return s
+})
+
+function isCniActive(id: string): boolean {
+  if (cniMulti.value) {
+    if (id === 'cni') return cni.value === 'cni'
+    if (id === '') return cni.value === ''
+    return cniSelectedSet.value.has(id)
+  }
+  return cni.value === id
+}
+
 function selectCni(id: string) {
-  cni.value = id
+  if (!cniMulti.value || id === 'cni' || id === '') {
+    // single-select, or the special "All CNI" / "None" options (always exclusive)
+    cni.value = id
+    return
+  }
+  // multi-select: toggle membership, starting from the specific selection
+  const set = new Set<string>(
+    cni.value === 'cni' || cni.value === '' ? [] : cniSelectedSet.value
+  )
+  if (set.has(id)) set.delete(id)
+  else set.add(id)
+  cni.value = [...set].sort().join(',')
 }
 
 const visibleLbOptions = computed(() =>
@@ -95,7 +144,7 @@ const visibleLbOptions = computed(() =>
 )
 
 const lbGroups = computed(() => {
-  const groups: { distro: string; label: string; iconKey: 'k3s' | 'rancher'; items: LoadBalancerOption[] }[] = []
+  const groups: { distro: string; label: string; iconKey: 'k3s' | 'rke2'; items: LoadBalancerOption[] }[] = []
   if (distros.value.includes('k3s')) {
     groups.push({
       distro: 'k3s',
@@ -108,7 +157,7 @@ const lbGroups = computed(() => {
     groups.push({
       distro: 'rke2',
       label: 'RKE2',
-      iconKey: 'rancher',
+      iconKey: 'rke2',
       items: visibleLbOptions.value.filter((o) => o.distro === 'rke2'),
     })
   }
@@ -125,12 +174,29 @@ function isLbActive(id: LoadBalancerOption['id']): boolean {
   }
 }
 
-function toggleLb(id: LoadBalancerOption['id']) {
+function setLbActive(id: LoadBalancerOption['id'], value: boolean) {
   switch (id) {
-    case 'lbK3sKlipper': lbK3sKlipper.value = !lbK3sKlipper.value; break
-    case 'lbK3sTraefik': lbK3sTraefik.value = !lbK3sTraefik.value; break
-    case 'lbRKE2Nginx': lbRKE2Nginx.value = !lbRKE2Nginx.value; break
-    case 'lbRKE2Traefik': lbRKE2Traefik.value = !lbRKE2Traefik.value; break
+    case 'lbK3sKlipper': lbK3sKlipper.value = value; break
+    case 'lbK3sTraefik': lbK3sTraefik.value = value; break
+    case 'lbRKE2Nginx': lbRKE2Nginx.value = value; break
+    case 'lbRKE2Traefik': lbRKE2Traefik.value = value; break
+  }
+}
+
+// Options that share the same (distro, role) are competing implementations
+// of the same function (e.g. RKE2's NGINX vs Traefik are both ingress
+// controllers) and are mutually exclusive: selecting one deselects the other
+// so the final image list always matches what's shown as active. Options
+// with different roles (e.g. K3s Klipper ServiceLB vs Traefik ingress) are
+// independent and are not affected by each other. Clicking an already-active
+// option turns it off.
+function toggleLb(id: LoadBalancerOption['id']) {
+  const opt = LOAD_BALANCER_OPTIONS.find((o) => o.id === id)
+  if (!opt) return
+  const turningOn = !isLbActive(id)
+  for (const sibling of visibleLbOptions.value) {
+    if (sibling.distro !== opt.distro || sibling.role !== opt.role) continue
+    setLbActive(sibling.id, sibling.id === id ? turningOn : false)
   }
 }
 
@@ -139,10 +205,20 @@ watch(
   () => [distros.value, cniOptions.value] as const,
   () => {
     const opts = cniOptions.value
-    const valid = opts.some((o) => o.id === cni.value)
-    const first = opts[0]
-    if (!valid && first) {
-      cni.value = first.id
+    const validIDs = new Set(opts.map((o) => o.id))
+    const multi = distros.value.length === 2
+    if (multi) {
+      // Keep only still-valid specific selections; drop "All"/"None" pseudo-values.
+      const kept: string[] = []
+      for (const part of (cni.value || '').split(',')) {
+        if (part && part !== 'cni' && validIDs.has(part) && !kept.includes(part)) kept.push(part)
+      }
+      cni.value = kept.sort().join(',')
+      if (!kept.length && opts[0]) cni.value = opts[0].id
+    } else {
+      const valid = validIDs.has(cni.value)
+      const first = opts[0]
+      if (!valid && first) cni.value = first.id
     }
     const d = distros.value
     if (!d.includes('k3s')) {
@@ -232,12 +308,29 @@ function closeRancherDropdown(e: Event) {
 const rancherVersionSummary = computed(() => {
   const sel = rancherVersions.value
   if (!sel?.length) return 'Select version(s)'
-  if (sel.length === 1) return sel[0]
+  if (sel.length === 1) {
+    const v = sel[0]
+    const meta = rancherVersionAnnotations.value.find((r) => r.version === v)
+    if (!meta) return v
+    const mode = rancherEditionAvailability(meta.primeAvailable, meta.communityAvailable)
+    return `${v} · ${rancherEditionAvailabilityLabel(mode)}`
+  }
   return `${sel.length} versions`
 })
 
+function rancherEditionMode(rv: { primeAvailable?: boolean; communityAvailable?: boolean }): RancherEditionAvailability {
+  return rancherEditionAvailability(rv.primeAvailable, rv.communityAvailable)
+}
+
 const rancherVersionAnnotations = computed(() =>
-  annotateRancherVersions(props.availableRancherVersions)
+  annotateRancherVersions(
+    props.availableRancherVersions.map((r) => ({
+      version: r.version,
+      date: r.date,
+      primeAvailable: r.primeAvailable,
+      communityAvailable: r.communityAvailable ?? true,
+    }))
+  )
 )
 
 const k3sVersionAnnotations = computed(() =>
@@ -276,13 +369,28 @@ onUnmounted(() => {
 
     <div class="field rancher-version-field">
       <label>Rancher version(s)</label>
-      <p class="field-hint">Select one or more; the image list will include images for all selected versions.</p>
-      <div class="version-legend rancher-version-legend">
-        <span class="version-legend-item"><span class="lifecycle-badge badge-current">Current</span> newest minor</span>
-        <span class="version-legend-item"><span class="lifecycle-badge badge-latest">Latest patch</span> highest patch</span>
-        <span class="version-legend-item"><span class="lifecycle-badge badge-eom">EOM</span> maintenance only</span>
-        <span class="version-legend-item"><span class="lifecycle-badge badge-eol">EOL</span> end of life</span>
+      <p class="field-hint">Select release(s). Defaults to newest stable patch.</p>
+
+      <div class="edition-explainer">
+        <div class="edition-explainer-card edition-community" title="Official open-source release on GitHub (rancher-images.txt, K3s/RKE2 lists).">
+          <img :src="rancherEditionIcon(false)" alt="" class="edition-explainer-icon" />
+          <strong>Community</strong>
+        </div>
+        <div class="edition-explainer-card edition-prime" title="Curated SUSE registry (prime.ribs.rancher.io) — certified for air-gapped Prime installs.">
+          <img :src="rancherEditionIcon(true)" alt="" class="edition-explainer-icon" />
+          <strong>Rancher Prime</strong>
+        </div>
       </div>
+
+      <details class="rancher-legend-details">
+        <summary>Lifecycle badges (Current, Latest, EOM…)</summary>
+        <div class="version-legend rancher-version-legend">
+          <span class="version-legend-item"><span class="lifecycle-badge badge-current">Current</span> newest stable minor</span>
+          <span class="version-legend-item"><span class="lifecycle-badge badge-latest">Latest patch</span> highest patch for minor</span>
+          <span class="version-legend-item"><span class="lifecycle-badge badge-deprecated">Deprecated</span> superseded patch</span>
+          <span class="version-legend-item"><span class="lifecycle-badge badge-eom">EOM</span> / <span class="lifecycle-badge badge-eol">EOL</span></span>
+        </div>
+      </details>
       <template v-if="availableRancherVersions?.length > 0">
         <div class="rancher-version-dropdown">
           <button
@@ -300,7 +408,10 @@ onUnmounted(() => {
                 v-for="rv in rancherVersionAnnotations"
                 :key="rv.version"
                 class="rancher-version-option"
-                :class="{ 'option-eol': rv.status === 'eol' }"
+                :class="{
+                  'option-eol': rv.status === 'eol',
+                  'option-deprecated': rv.isDeprecatedPatch,
+                }"
                 :title="lifecycleStatusTitle(rv)"
               >
                 <input
@@ -309,8 +420,33 @@ onUnmounted(() => {
                   @change="toggleRancherVersion(rv.version)"
                 />
                 <span class="option-version">{{ rv.version }}</span>
+                <span
+                  class="edition-pill"
+                  :class="`edition-pill-${rancherEditionMode(rv)}`"
+                  :title="rancherEditionAvailabilityHint(rancherEditionMode(rv))"
+                >
+                  <span class="edition-pill-icons">
+                    <img
+                      v-if="rv.communityAvailable !== false"
+                      :src="rancherEditionIcon(false)"
+                      alt=""
+                      class="edition-pill-icon"
+                      title="Community (GitHub)"
+                    />
+                    <img
+                      v-if="rv.primeAvailable"
+                      :src="rancherEditionIcon(true)"
+                      alt=""
+                      class="edition-pill-icon"
+                      title="Rancher Prime (prime.ribs)"
+                    />
+                  </span>
+                  <span class="edition-pill-label">{{ rancherEditionAvailabilityLabel(rancherEditionMode(rv)) }}</span>
+                  <span class="edition-pill-sub">{{ rancherEditionAvailabilityShort(rancherEditionMode(rv)) }}</span>
+                </span>
                 <span v-if="rv.isCurrentMinor" class="lifecycle-badge badge-current">Current</span>
                 <span v-else-if="rv.isLatestPatch" class="lifecycle-badge badge-latest">Latest patch</span>
+                <span v-else-if="rv.isDeprecatedPatch" class="lifecycle-badge badge-deprecated">Deprecated</span>
                 <span v-if="rv.status === 'maintenance'" class="lifecycle-badge badge-eom">{{ lifecycleStatusLabel(rv.status) }}</span>
                 <span v-if="rv.status === 'eol'" class="lifecycle-badge badge-eol">{{ lifecycleStatusLabel(rv.status) }}</span>
                 <span v-if="rv.releaseDate" class="option-date">{{ rv.releaseDate }}</span>
@@ -335,13 +471,17 @@ onUnmounted(() => {
         class="input"
       />
       <LoadingShapes v-if="optionsLoading" size="sm" class="options-loader" />
-      <label class="check rc-toggle">
-        <input v-model="includeGitHubVersions" type="checkbox" />
-        Include versions from GitHub (K3s/RKE2 release tags; shows newer than KDM)
+      <label class="check rc-toggle" title="All stable patches per Kubernetes minor; superseded ones marked Deprecated.">
+        <input v-model="includeDeprecatedPatches" type="checkbox" />
+        Include older KDM patches
       </label>
-      <label v-if="includeGitHubVersions" class="check rc-toggle">
+      <label class="check rc-toggle" title="K3s/RKE2 tags newer than KDM — not older stable patches.">
+        <input v-model="includeGitHubVersions" type="checkbox" />
+        Include GitHub versions
+      </label>
+      <label v-if="includeGitHubVersions" class="check rc-toggle" title="RC/alpha/beta K3s/RKE2 versions from GitHub.">
         <input v-model="includeRC" type="checkbox" />
-        Include pre-release (RC/alpha/beta) versions from GitHub
+        Include pre-releases
       </label>
       <p v-if="loadError" class="error-msg">{{ loadError }}</p>
     </div>
@@ -349,19 +489,32 @@ onUnmounted(() => {
     <div class="field source-field">
       <label class="label-with-icon">
         <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/rancher.svg" alt="" class="ctx-icon" />
-        Image list source
+        Image list source (what to merge into your export)
       </label>
-      <div class="radio-group">
-        <label class="radio">
-          <input v-model="isRPMGC" type="radio" :value="false" />
-          <span>Community <span class="source-detail">image lists from GitHub releases (k3s-io/k3s, rancher/rke2)</span></span>
+      <p class="field-hint source-field-hint">Pick registries to pull image lists from.</p>
+      <div class="checkbox-group source-checkboxes">
+        <label class="checkbox-label source-card" :class="{ active: includeCommunityImageLists }" title="GitHub releases: rancher-images.txt, K3s/RKE2 lists from k3s-io/k3s and rancher/rke2.">
+          <input v-model="includeCommunityImageLists" type="checkbox" />
+          <img :src="rancherEditionIcon(false)" alt="" class="source-edition-icon" />
+          <span class="source-card-body">
+            <span class="source-card-title">Community</span>
+            <span class="source-detail">GitHub releases</span>
+          </span>
         </label>
-        <label class="radio">
-          <input v-model="isRPMGC" type="radio" :value="true" />
-          <span>Rancher Prime <span class="source-detail">image lists from prime.ribs.rancher.io (curated/certified)</span></span>
+        <label class="checkbox-label source-card" :class="{ active: isRPMGC }" title="prime.ribs.rancher.io — curated/certified lists for SUSE Rancher Prime air-gap installs.">
+          <input v-model="isRPMGC" type="checkbox" />
+          <img :src="rancherEditionIcon(true)" alt="" class="source-edition-icon" />
+          <span class="source-card-body">
+            <span class="source-card-title">Rancher Prime</span>
+            <span class="source-detail">prime.ribs.rancher.io</span>
+          </span>
         </label>
       </div>
-      <p class="source-note">Both sources use the same KDM (releases.rancher.com) and chart repos (rancher/charts on GitHub).</p>
+      <p v-if="!includeCommunityImageLists && !isRPMGC" class="source-warn">Select at least one image list source.</p>
+      <p class="source-note" title="When both are on, K3s/RKE2 come from Prime; Community still adds GitHub rancher-images.txt (falls back to prime.ribs if missing). KDM and charts are the same either way.">Enable both to merge lists.</p>
+      <div v-if="isRPMGC && distros.includes('rke2')" class="prime-patcher-hint">
+        <strong>rke2-patcher available</strong> — patched CVE-fixed images for Prime RKE2. Commands in Step 3.
+      </div>
     </div>
 
     <div class="field">
@@ -375,17 +528,33 @@ onUnmounted(() => {
       </template>
     </div>
 
+    <div class="field opt-in-repos">
+      <p class="field-hint" title="Not part of the default rancher/charts bundle. Changing later requires generating again.">Optional chart repos — select before generating.</p>
+      <label class="checkbox-label" title="TLS certificate controller from jetstack — install before Rancher Helm chart. Images: quay.io/jetstack/cert-manager-*.">
+        <input v-model="includeCertManager" type="checkbox" />
+        Include cert-manager (required for Rancher install)
+      </label>
+      <label class="checkbox-label">
+        <input v-model="includePartnerCharts" type="checkbox" />
+        Include Partner Charts (rancher/partner-charts)
+      </label>
+      <label class="checkbox-label" title="Rancher dashboard extension charts (e.g. Elemental UI), shown separately in Step 3 — distinct from ui-plugin-operator under Essentials.">
+        <input v-model="includeUIPluginCharts" type="checkbox" />
+        Include UI Plugins (rancher/ui-plugin-charts)
+      </label>
+    </div>
+
     <div class="field">
       <label>Distros</label>
       <div class="check-group distros-group">
         <label class="check">
           <input type="checkbox" :checked="distros.includes('k3s')" @change="toggleDistro('k3s')" />
-          <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/k3s.svg" alt="" class="ctx-icon ctx-icon-sm" />
+          <img :src="brandIcon('k3s')" alt="" class="ctx-icon ctx-icon-sm" />
           K3s
         </label>
         <label class="check">
           <input type="checkbox" :checked="distros.includes('rke2')" @change="toggleDistro('rke2')" />
-          <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/rancher.svg" alt="" class="ctx-icon ctx-icon-sm" />
+          <img :src="brandIcon('rke2')" alt="" class="ctx-icon ctx-icon-sm" />
           RKE2
         </label>
       </div>
@@ -396,14 +565,19 @@ onUnmounted(() => {
         <img src="https://cdn.jsdelivr.net/npm/simple-icons@v16/icons/kubernetes.svg" alt="" class="ctx-icon" />
         Kubernetes versions
       </label>
-      <p v-if="!includeGitHubVersions" class="version-gh-hint">
-        Only KDM-supported versions are shown. Enable <strong>Include versions from GitHub</strong> above to add newer K3s/RKE2 versions from GitHub releases.
+      <p
+        v-if="!includeDeprecatedPatches && !includeGitHubVersions"
+        class="version-gh-hint"
+        title="Enable 'Include older KDM patches' for superseded releases, or 'Include GitHub versions' for tags ahead of KDM."
+      >
+        Showing latest KDM patch per minor.
       </p>
       <div class="version-legend">
         <span class="version-legend-item"><span class="legend-swatch swatch-kdm"></span> KDM (Rancher supported)</span>
         <span v-if="includeGitHubVersions" class="version-legend-item"><span class="legend-swatch swatch-gh"></span> GitHub release (newer)</span>
         <span class="version-legend-item"><span class="lifecycle-badge badge-current">Current</span> newest minor line</span>
         <span class="version-legend-item"><span class="lifecycle-badge badge-latest">Latest patch</span> highest patch for minor</span>
+        <span v-if="includeDeprecatedPatches" class="version-legend-item"><span class="lifecycle-badge badge-deprecated">Deprecated</span> superseded patch</span>
         <span class="version-legend-item"><span class="lifecycle-badge badge-eom">EOM</span> maintenance only</span>
         <span class="version-legend-item"><span class="lifecycle-badge badge-eol">EOL</span> end of life</span>
       </div>
@@ -425,6 +599,7 @@ onUnmounted(() => {
               'chip-github': versionSource('k3s', meta.version) === 'github',
               'chip-kdm': versionSource('k3s', meta.version) === 'kdm' || versionSource('k3s', meta.version) === 'both',
               'chip-eol': meta.status === 'eol',
+              'chip-deprecated': meta.isDeprecatedPatch,
             }"
             :title="lifecycleStatusTitle(meta)"
           >
@@ -432,6 +607,7 @@ onUnmounted(() => {
             {{ meta.version }}
             <span v-if="meta.isCurrentMinor" class="lifecycle-badge badge-current">Current</span>
             <span v-else-if="meta.isLatestPatch" class="lifecycle-badge badge-latest">Latest</span>
+            <span v-else-if="meta.isDeprecatedPatch" class="lifecycle-badge badge-deprecated">Deprecated</span>
             <span v-if="meta.status === 'maintenance'" class="lifecycle-badge badge-eom">{{ lifecycleStatusLabel(meta.status) }}</span>
             <span v-if="meta.status === 'eol'" class="lifecycle-badge badge-eol">{{ lifecycleStatusLabel(meta.status) }}</span>
             <span v-if="versionSource('k3s', meta.version) === 'github'" class="chip-badge" title="From GitHub releases (not in KDM)">GH</span>
@@ -457,6 +633,7 @@ onUnmounted(() => {
               'chip-github': versionSource('rke2', meta.version) === 'github',
               'chip-kdm': versionSource('rke2', meta.version) === 'kdm' || versionSource('rke2', meta.version) === 'both',
               'chip-eol': meta.status === 'eol',
+              'chip-deprecated': meta.isDeprecatedPatch,
             }"
             :title="lifecycleStatusTitle(meta)"
           >
@@ -464,6 +641,7 @@ onUnmounted(() => {
             {{ meta.version }}
             <span v-if="meta.isCurrentMinor" class="lifecycle-badge badge-current">Current</span>
             <span v-else-if="meta.isLatestPatch" class="lifecycle-badge badge-latest">Latest</span>
+            <span v-else-if="meta.isDeprecatedPatch" class="lifecycle-badge badge-deprecated">Deprecated</span>
             <span v-if="meta.status === 'maintenance'" class="lifecycle-badge badge-eom">{{ lifecycleStatusLabel(meta.status) }}</span>
             <span v-if="meta.status === 'eol'" class="lifecycle-badge badge-eol">{{ lifecycleStatusLabel(meta.status) }}</span>
             <span v-if="versionSource('rke2', meta.version) === 'github'" class="chip-badge" title="From GitHub releases (not in KDM)">GH</span>
@@ -475,7 +653,6 @@ onUnmounted(() => {
 
     <div class="field platform-field">
       <label>Platform</label>
-      <p class="field-note">Target node operating systems for container images.</p>
       <div class="option-cards platform-cards">
         <label class="option-card platform-card" :class="{ active: !includeWindows }">
           <input v-model="includeWindows" type="radio" :value="false" hidden />
@@ -505,18 +682,51 @@ onUnmounted(() => {
           </span>
         </label>
       </div>
+      <div class="arch-field">
+        <label>Node architecture</label>
+        <div class="option-cards arch-cards">
+          <label class="option-card arch-card" :class="{ active: arch === 'amd64' }">
+            <input v-model="arch" type="radio" value="amd64" hidden />
+            <span class="option-card-head">
+              <span class="option-logo-wrap">
+                <span class="arch-glyph">x86</span>
+              </span>
+              <span class="option-card-meta">
+                <span class="option-card-title">amd64</span>
+                <span class="option-card-desc">Intel/AMD 64-bit — default for most clusters</span>
+              </span>
+              <span class="option-check" :class="{ on: arch === 'amd64' }" aria-hidden="true" />
+            </span>
+          </label>
+          <label class="option-card arch-card" :class="{ active: arch === 'arm64' }">
+            <input v-model="arch" type="radio" value="arm64" hidden />
+            <span class="option-card-head">
+              <span class="option-logo-wrap">
+                <span class="arch-glyph">ARM</span>
+              </span>
+              <span class="option-card-meta">
+                <span class="option-card-title">arm64</span>
+                <span class="option-card-desc">aarch64 — Graviton, Ampere, Apple Silicon nodes</span>
+              </span>
+              <span class="option-check" :class="{ on: arch === 'arm64' }" aria-hidden="true" />
+            </span>
+          </label>
+        </div>
+      </div>
     </div>
 
     <div v-if="distros.length > 0" class="field cni-field">
       <label>Container Network (CNI)</label>
-      <p class="field-note">Pod networking plugin for your cluster profile.</p>
+      <p v-if="cniMulti" class="field-note">
+        <span class="cni-multi-hint">Both distros selected — pick one or more CNIs.</span>
+      </p>
       <div class="option-cards cni-cards">
         <button
           v-for="o in cniCards"
           :key="o.id || 'none'"
           type="button"
           class="option-card cni-card"
-          :class="{ active: cni === o.id }"
+          :class="{ active: isCniActive(o.id) }"
           @click="selectCni(o.id)"
         >
           <span class="option-card-head">
@@ -530,7 +740,7 @@ onUnmounted(() => {
               </span>
               <span class="option-card-desc">{{ o.description }}</span>
             </span>
-            <span class="option-check" :class="{ on: cni === o.id }" aria-hidden="true" />
+            <span class="option-check" :class="{ on: isCniActive(o.id) }" aria-hidden="true" />
           </span>
           <span v-if="o.id" class="option-card-foot">
             <a v-if="o.docsUrl" :href="o.docsUrl" target="_blank" rel="noopener noreferrer" class="option-link" @click.stop>Documentation</a>
@@ -542,7 +752,6 @@ onUnmounted(() => {
 
     <div v-if="distros.length > 0 && visibleLbOptions.length" class="field lb-field">
       <label>Load balancer / Ingress</label>
-      <p class="field-note">Optional ingress controllers and service load balancers per distro.</p>
       <div v-for="group in lbGroups" :key="group.distro" class="lb-group">
         <div class="lb-group-head">
           <img :src="brandIcon(group.iconKey)" alt="" class="lb-group-logo" />
@@ -634,14 +843,57 @@ onUnmounted(() => {
   font-size: 0.85rem;
   opacity: 0.88;
 }
+.field-hint-sub {
+  margin-top: 0.35rem;
+  margin-bottom: 0;
+}
+.opt-in-repos {
+  padding: 0.65rem 0.75rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--panel) 90%, var(--bg));
+}
 .rancher-version-field {
   flex-direction: column;
   align-items: stretch;
 }
+.edition-explainer {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 0.55rem;
+  margin: 0.5rem 0 0.35rem;
+}
+.edition-explainer-card {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.45rem 0.65rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  font-size: 0.82rem;
+  cursor: default;
+}
+.edition-explainer-card strong {
+  font-weight: 600;
+}
+.edition-explainer-card.edition-community {
+  background: color-mix(in srgb, var(--accent) 8%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+}
+.edition-explainer-card.edition-prime {
+  background: color-mix(in srgb, #7c3aed 8%, var(--panel));
+  border-color: color-mix(in srgb, #7c3aed 28%, var(--border));
+}
+.edition-explainer-icon {
+  width: 1.75rem;
+  height: 1.75rem;
+  flex-shrink: 0;
+  object-fit: contain;
+}
 .rancher-version-dropdown {
   position: relative;
   width: 100%;
-  max-width: 480px;
+  max-width: 640px;
 }
 .rancher-version-trigger {
   display: flex;
@@ -685,14 +937,78 @@ onUnmounted(() => {
   padding: 0.35rem 0;
 }
 .rancher-version-option {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(5.5rem, 1fr) minmax(9rem, 1.4fr) auto auto auto;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 0.4rem 0.75rem;
+  gap: 6px 8px;
+  padding: 0.45rem 0.75rem;
   font-size: 0.88rem;
   cursor: pointer;
   user-select: none;
+}
+@media (max-width: 640px) {
+  .rancher-version-option {
+    grid-template-columns: auto 1fr;
+  }
+  .edition-pill {
+    grid-column: 2 / -1;
+  }
+}
+.edition-pill {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 0.2rem 0.45rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  line-height: 1.2;
+}
+.edition-pill-icons {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.edition-pill-icon {
+  width: 1rem;
+  height: 1rem;
+  object-fit: contain;
+}
+.edition-pill-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.edition-pill-sub {
+  font-size: 0.65rem;
+  opacity: 0.85;
+}
+.edition-pill-both {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 12%, var(--panel)) 0%,
+    color-mix(in srgb, var(--accent) 12%, var(--panel)) 48%,
+    color-mix(in srgb, #7c3aed 12%, var(--panel)) 52%,
+    color-mix(in srgb, #7c3aed 12%, var(--panel)) 100%
+  );
+  border-color: color-mix(in srgb, #7c3aed 25%, var(--accent));
+}
+.edition-pill-both .edition-pill-label {
+  color: var(--text);
+}
+.edition-pill-community-only {
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.edition-pill-community-only .edition-pill-label {
+  color: var(--accent);
+}
+.edition-pill-prime-only {
+  background: color-mix(in srgb, #7c3aed 10%, var(--panel));
+  border-color: color-mix(in srgb, #7c3aed 35%, transparent);
+}
+.edition-pill-prime-only .edition-pill-label {
+  color: #6d28d9;
 }
 .rancher-version-option:hover {
   background: var(--panel-elevated);
@@ -721,20 +1037,80 @@ onUnmounted(() => {
 .rancher-version-legend {
   margin: 0.35rem 0 0.5rem;
 }
+.rancher-legend-details {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+}
+.rancher-legend-details summary {
+  cursor: pointer;
+  user-select: none;
+}
+.rancher-legend-details[open] summary {
+  margin-bottom: 0.35rem;
+}
 .rancher-version-option.option-eol {
   opacity: 0.75;
 }
+.rancher-version-option.option-deprecated {
+  opacity: 0.88;
+}
+.legend-edition-icon,
+.badge-edition-icon {
+  width: 0.85rem;
+  height: 0.85rem;
+  object-fit: contain;
+  vertical-align: middle;
+  margin-right: 2px;
+}
+.lifecycle-badge.badge-prime {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: color-mix(in srgb, #7c3aed 14%, var(--panel));
+  color: #6d28d9;
+  border: 1px solid color-mix(in srgb, #7c3aed 30%, transparent);
+}
+.lifecycle-badge.badge-community {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, transparent);
+}
 .cni-field,
 .lb-field,
-.platform-field {
+.platform-field,
+.arch-field {
   flex-direction: column;
   align-items: stretch;
 }
-.platform-cards {
+.platform-cards,
+.arch-cards {
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
 }
-.platform-card {
+.platform-card,
+.arch-card {
   cursor: pointer;
+}
+.arch-glyph {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 15%, var(--panel));
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.cni-multi-hint {
+  color: var(--cyan);
+  font-weight: 600;
 }
 .option-logo-wrap-dual {
   gap: 2px;
@@ -1055,6 +1431,10 @@ onUnmounted(() => {
   opacity: 0.72;
   border-color: color-mix(in srgb, var(--text-muted) 50%, var(--border));
 }
+.version-chip.chip-deprecated:not(.active) {
+  opacity: 0.82;
+  border-color: color-mix(in srgb, #b45309 35%, var(--border));
+}
 .lifecycle-badge {
   font-size: 0.58rem;
   font-weight: 700;
@@ -1081,6 +1461,11 @@ onUnmounted(() => {
 .badge-eol {
   background: #64748b;
   color: #fff;
+}
+.badge-deprecated {
+  background: color-mix(in srgb, #b45309 16%, var(--panel));
+  color: #b45309;
+  border: 1px solid color-mix(in srgb, #b45309 35%, transparent);
 }
 .version-chip.active .lifecycle-badge.badge-latest {
   background: color-mix(in srgb, #fff 22%, transparent);
@@ -1161,6 +1546,74 @@ onUnmounted(() => {
   font-size: 0.78rem;
   opacity: 0.6;
   margin: 0.25rem 0 0;
+}
+.source-warn {
+  font-size: 0.78rem;
+  color: var(--warn, #c9a227);
+  margin: 0.35rem 0 0;
+}
+.source-field-hint {
+  margin-bottom: 0.35rem;
+}
+.source-checkboxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 0.55rem;
+  width: 100%;
+}
+.source-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.source-card.active {
+  border-color: var(--border-strong);
+  background: color-mix(in srgb, var(--accent) 6%, var(--panel));
+}
+.source-card:has(input:checked) {
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+.source-edition-icon {
+  width: 1.6rem;
+  height: 1.6rem;
+  flex-shrink: 0;
+  object-fit: contain;
+  margin-top: 0.1rem;
+}
+.source-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+}
+.source-card-title {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+.source-checkboxes .source-detail {
+  opacity: 0.82;
+  line-height: 1.35;
+}
+.prime-patcher-hint {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.7rem;
+  font-size: 0.8rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  color: var(--text);
+  line-height: 1.45;
+}
+.prime-patcher-hint code {
+  background: var(--bg);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.85em;
 }
 .data-sources {
   margin-top: 1rem;

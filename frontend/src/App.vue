@@ -92,6 +92,7 @@ const genRequest = reactive<GenerateRequest>({
   includeAppCollectionCharts: false,
   includePartnerCharts: false,
   includeUIPluginCharts: false,
+  includeCertManager: true,
   appCollectionAPIUser: '',
   appCollectionAPIPassword: '',
   distros: ['rke2'],
@@ -418,6 +419,7 @@ function backToStep1() {
               v-model:include-app-collection="genRequest.includeAppCollectionCharts"
               v-model:include-partner-charts="genRequest.includePartnerCharts"
               v-model:includeUIPluginCharts="genRequest.includeUIPluginCharts"
+              v-model:include-cert-manager="genRequest.includeCertManager"
               v-model:app-user="genRequest.appCollectionAPIUser"
               v-model:app-password="genRequest.appCollectionAPIPassword"
               v-model:distros="genRequest.distros"

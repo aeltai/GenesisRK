@@ -42,6 +42,9 @@ type ChartComponentGroup struct {
 	Name        string
 	Category    string
 	Description string
+	// Repo is the source group of the chart repo this chart came from
+	// (SourceGroupCharts, SourceGroupPartnerCharts, SourceGroupUIPluginCharts).
+	Repo string
 
 	LinuxImages   map[string]bool
 	WindowsImages map[string]bool
@@ -87,7 +90,7 @@ var componentDefinitions = []componentDefinition{
 	{
 		id:          "system_addons",
 		name:        "System Add-ons",
-		description: "Core Rancher: rancher, rancher-agent, rancher-webhook, remotedialer-proxy, fleet, system-upgrade-controller, turtles, CoreDNS, metrics-server.",
+		description: "Core Rancher: rancher, rancher-agent, shell, machine, kubectl, rancher-webhook, remotedialer-proxy, fleet, system-upgrade-controller, turtles, cert-manager, CoreDNS, metrics-server.",
 		matchers: []componentMatcher{
 			{Prefixes: []string{
 				"rancher/rancher",
@@ -96,6 +99,12 @@ var componentDefinitions = []componentDefinition{
 				"rancher/remotedialer-proxy",
 				"rancher/system-upgrade-controller",
 				"rancher/turtles",
+				// Core images from the official rancher-images.txt; referenced
+				// by Rancher settings, required for air-gapped downstream clusters.
+				"rancher/shell",
+				"rancher/machine",
+				"rancher/kubectl",
+				"rancher/system-agent",
 			}},
 			{Contains: []string{
 				"rancher-agent",
@@ -107,6 +116,7 @@ var componentDefinitions = []componentDefinition{
 				"k8s-dns-",
 				"fleet-agent",
 				"fleet-controller",
+				"cert-manager",
 			}},
 		},
 	},
@@ -319,9 +329,24 @@ const (
 	SourceGroupRKE2                    = "source_rke2"
 	SourceGroupRKE1                    = "source_rke1"
 	SourceGroupCharts                  = "source_charts"
+	SourceGroupPartnerCharts           = "source_partner_charts"
+	SourceGroupUIPluginCharts          = "source_ui_plugin_charts"
 	SourceGroupAppCollection           = "source_app_collection"
 	SourceGroupAppCollectionContainers = "app_collection_containers"
 )
+
+// chartSourceGroupID returns the source group for a chart source string based
+// on the repo path embedded in it ([path;chartName:version]).
+func chartSourceGroupID(source string) string {
+	switch {
+	case strings.Contains(source, "partner-charts"):
+		return SourceGroupPartnerCharts
+	case strings.Contains(source, "ui-plugin-charts"):
+		return SourceGroupUIPluginCharts
+	default:
+		return SourceGroupCharts
+	}
+}
 
 // Tier A: Core Infrastructure (must-have). Display order for Step 2.
 var TierAOrder = []string{
@@ -399,6 +424,54 @@ func BasicPresetWithCNI(components string, cni string) []string {
 	return out
 }
 
+// BasicPresetWithCNIs is the multi-CNI variant of BasicPresetWithCNI. Each entry
+// in cnis is appended (e.g. ["cni_flannel","cni_canal"]). "cni" (all) and "" are
+// passed through as a single entry to preserve the "all CNI" behavior.
+func BasicPresetWithCNIs(components string, cnis []string) []string {
+	out := []string{"system_addons"}
+	if components != "" {
+		parts := strings.Split(components, ",")
+		for _, part := range parts {
+			part = strings.TrimSpace(part)
+			switch part {
+			case "k3s", "1":
+				out = append(out, SourceGroupK3s)
+			case "rke2", "2":
+				out = append(out, SourceGroupRKE2)
+			case "rke", "rke1", "3":
+				out = append(out, SourceGroupRKE1)
+			}
+		}
+	} else {
+		out = append(out, SourceGroupK3s, SourceGroupRKE2, SourceGroupRKE1)
+	}
+	for _, c := range cnis {
+		if c != "" {
+			out = append(out, c)
+		}
+	}
+	return out
+}
+
+// SelectedCNISet parses a (possibly comma-separated) CNI selection string into
+// the set of specific CNI component IDs chosen (e.g. {"cni_canal": true}).
+// Generic selectors ("cni", "", "none") yield an empty set, meaning no specific
+// CNI filter (include all CNIs).
+func SelectedCNISet(cni string) map[string]bool {
+	out := make(map[string]bool)
+	if cni == "" || cni == "none" || cni == "cni" {
+		return out
+	}
+	for _, part := range strings.Split(cni, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" || part == "none" || part == "cni" {
+			continue
+		}
+		out[part] = true
+	}
+	return out
+}
+
 // PriorityLevel3Preset is Full Stack: Level 2 + Monitoring + Logging + Backup.
 func PriorityLevel3Preset() []string {
 	return []string{
@@ -464,12 +537,7 @@ func GroupImagesBySource(
 				break
 			}
 		}
-		for source := range sources {
-			if _, ok := parseChartNameFromSource(source); ok {
-				add(SourceGroupCharts, "Charts / add-ons", "Rancher chart add-ons (monitoring, logging, backup, etc.).", img, false)
-				break
-			}
-		}
+		addChartSourceGroups(add, img, sources, false)
 	}
 	for img, sources := range windowsImages {
 		for source := range sources {
@@ -502,14 +570,37 @@ func GroupImagesBySource(
 				break
 			}
 		}
-		for source := range sources {
-			if _, ok := parseChartNameFromSource(source); ok {
-				add(SourceGroupCharts, "Charts / add-ons", "Rancher chart add-ons (monitoring, logging, backup, etc.).", img, true)
-				break
-			}
-		}
+		addChartSourceGroups(add, img, sources, true)
 	}
 	return groups
+}
+
+// addChartSourceGroups classifies chart-sourced images into their repo group
+// (rancher charts, partner charts, UI plugin charts). An image is added to
+// every distinct chart repo group it has a source in.
+func addChartSourceGroups(
+	add func(id, name, desc string, img string, isWindows bool),
+	img string, sources map[string]bool, isWindows bool,
+) {
+	seen := map[string]bool{}
+	for source := range sources {
+		if _, ok := parseChartNameFromSource(source); !ok {
+			continue
+		}
+		id := chartSourceGroupID(source)
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		switch id {
+		case SourceGroupPartnerCharts:
+			add(id, "Partner Charts", "Rancher partner charts (rancher/partner-charts).", img, isWindows)
+		case SourceGroupUIPluginCharts:
+			add(id, "UI Plugins", "Rancher UI plugin charts (rancher/ui-plugin-charts).", img, isWindows)
+		default:
+			add(id, "Charts / add-ons", "Rancher chart add-ons (monitoring, logging, backup, etc.).", img, isWindows)
+		}
+	}
 }
 
 // GroupImagesByComponent groups the provided Linux and Windows images into
@@ -607,7 +698,7 @@ func matchesAny(path string, matchers []componentMatcher) bool {
 // chartCategoryByName provides optional higher-level categories for well-known
 // Rancher charts. Aligned with Rancher image/chart grouping by functionality.
 var chartCategoryByName = map[string]string{
-	// Core Rancher / Basic (rancher-webhook, provisioning-capi, turtles, system-upgrade, remotedialer)
+	// Core Rancher / Basic (rancher-webhook, provisioning-capi, turtles, system-upgrade, remotedialer, cert-manager)
 	"rancher-webhook":           "core",
 	"rancher-provisioning-capi": "cluster-api",
 	"rancher-turtles":           "cluster-api",
@@ -617,6 +708,7 @@ var chartCategoryByName = map[string]string{
 	"ui-plugin-operator":        "core",
 	"ui-plugin-operator-crd":    "core",
 	"rancher-k3s-upgrader":      "core",
+	"cert-manager":              "core",
 
 	// Fleet & GitOps (core: part of Basic/Rancher stack)
 	"fleet":            "core",
@@ -722,6 +814,7 @@ func GroupImagesByChart(
 				g = &ChartComponentGroup{
 					Name:          chartName,
 					Category:      chartCategoryByName[chartName],
+					Repo:          chartSourceGroupID(source),
 					LinuxImages:   make(map[string]bool),
 					WindowsImages: make(map[string]bool),
 				}

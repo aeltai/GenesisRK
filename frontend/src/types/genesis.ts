@@ -24,6 +24,7 @@ export interface TreeNode {
   description?: string
   version?: string
   category?: string
+  iconUrl?: string
   children?: TreeNode[]
 }
 
@@ -31,11 +32,19 @@ export interface GenerateRequest {
   rancherVersion: string
   rancherVersions?: string[]
   isRPMGC: boolean
+  includeCommunityImageLists: boolean
   includeAppCollectionCharts: boolean
+  includePartnerCharts: boolean
+  includeUIPluginCharts: boolean
+  includeCertManager: boolean
   appCollectionAPIUser: string
   appCollectionAPIPassword: string
   distros: string[]
   cni: string
+  /** Multiple CNIs (used when both distros are selected). Sent to backend as CNIs. */
+  cnis?: string[]
+  /** Target architecture for RKE2 image lists and registry checks (amd64 or arm64). */
+  arch?: string
   loadBalancer: boolean
   lbK3sKlipper: boolean
   lbK3sTraefik: boolean
@@ -44,6 +53,8 @@ export interface GenerateRequest {
   includeWindows: boolean
   k3sVersions: string[]
   rke2Versions: string[]
+  /** Include every KDM patch per Kubernetes minor (not only the latest). */
+  includeDeprecatedPatches?: boolean
   /** Optional destination registry for mirror/save/load and Hauler; used in Next steps commands. */
   destinationRegistry?: string
 }
