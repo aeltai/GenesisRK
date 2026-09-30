@@ -111,6 +111,13 @@ do_up() {
   az containerapp update --name "$CONTAINERAPP_NAME" --resource-group "$RESOURCE_GROUP_NAME" \
     --min-replicas 1 --output none 2>/dev/null || true
 
+  # Generate clones rancher/charts — 1Gi OOMs (exit 137) mid git compress.
+  CPU="${CONTAINERAPP_CPU:-1.0}"
+  MEM="${CONTAINERAPP_MEMORY:-2.0Gi}"
+  log "Setting resources to ${CPU} CPU / ${MEM} memory..."
+  az containerapp update --name "$CONTAINERAPP_NAME" --resource-group "$RESOURCE_GROUP_NAME" \
+    --cpu "$CPU" --memory "$MEM" --output none 2>/dev/null || true
+
   # Pass GitHub token from local .env into the container app (avoids API rate limits)
   if [[ -n "${GITHUB_TOKEN:-}" ]]; then
     log "Setting GITHUB_TOKEN on container app..."
