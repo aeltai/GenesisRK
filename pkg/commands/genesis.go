@@ -1730,14 +1730,8 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			}
 		}
 
-		// 4. Filter out storage-related images by name pattern
-		// (harvester, longhorn, CSI drivers, cloud providers)
-		if strings.Contains(imgLower, "harvester") ||
-			strings.Contains(imgLower, "longhorn") ||
-			strings.Contains(imgLower, "csi-") ||
-			strings.Contains(imgLower, "cloud-provider") ||
-			strings.Contains(imgLower, "vsphere") ||
-			strings.Contains(imgLower, "local-path-provisioner") {
+		// 4. Optional storage / infra cloud providers (not distro defaults)
+		if excludeOptionalStorageFromEssentials(imgLower) {
 			shouldExclude = true
 		}
 
@@ -2544,6 +2538,32 @@ func keysOf(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// excludeOptionalStorageFromEssentials reports whether an image should be kept
+// out of the Essentials/Basic preset as optional storage or infra cloud-provider
+// tooling. Distro defaults required to create clusters must NOT match:
+//   - rke2-cloud-provider (RKE2 CCM from rke2-images-core)
+//   - local-path-provisioner (default K3s storage from k3s-images.txt)
+func excludeOptionalStorageFromEssentials(imgLower string) bool {
+	// Keep RKE2 / K3s defaults that are required for cluster create.
+	if strings.Contains(imgLower, "rke2-cloud-provider") ||
+		strings.Contains(imgLower, "local-path-provisioner") {
+		return false
+	}
+	// Optional marketplace / infra storage & cloud providers.
+	if strings.Contains(imgLower, "harvester") ||
+		strings.Contains(imgLower, "longhorn") ||
+		strings.Contains(imgLower, "vsphere") ||
+		strings.Contains(imgLower, "cloud-provider") {
+		return true
+	}
+	// Generic CSI sidecars / out-of-tree drivers — not CNI-bundled Calico CSI
+	// (mirrored-calico-csi has no "csi-" substring).
+	if strings.Contains(imgLower, "csi-") && !strings.Contains(imgLower, "calico") {
+		return true
+	}
+	return false
 }
 
 // filterImagesByVersions filters images based on selected Kubernetes versions.
