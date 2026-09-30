@@ -387,7 +387,7 @@ const COMPONENT_LIFECYCLE: Record<string, ComponentLifecycleAnnotation> = {
   // Named Rancher charts (aligned with pkg/rancher/listgenerator/components.go)
   'rancher-webhook': { component: 'Rancher Webhook', status: 'supported', source: 'rancher/charts' },
   'rancher-provisioning-capi': { component: 'Rancher Provisioning CAPI', status: 'supported', source: 'rancher/charts' },
-  'rancher-turtles': { component: 'Rancher Turtles', status: 'supported', source: 'rancher/turtles' },
+  'rancher-turtles': { component: 'Rancher Turtles', status: 'supported', source: 'rancher/turtles', note: 'Default CAPI integration (2.13+); only supported CAPI path in Rancher 2.14+ (embedded provisioning-capi removed).' },
   'cert-manager': { component: 'cert-manager', status: 'supported', source: 'quay.io/jetstack (prerequisite for Rancher Helm)', note: 'Install before the Rancher Helm chart.' },
   'system-upgrade-controller': { component: 'System Upgrade Controller', status: 'supported', source: 'rancher/system-upgrade-controller' },
   'remotedialer-proxy': { component: 'Remotedialer Proxy', status: 'supported', source: 'rancher/remotedialer' },

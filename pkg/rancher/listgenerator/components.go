@@ -700,8 +700,8 @@ func matchesAny(path string, matchers []componentMatcher) bool {
 var chartCategoryByName = map[string]string{
 	// Core Rancher / Basic (rancher-webhook, provisioning-capi, turtles, system-upgrade, remotedialer, cert-manager)
 	"rancher-webhook":           "core",
-	"rancher-provisioning-capi": "cluster-api",
-	"rancher-turtles":           "cluster-api",
+	"rancher-provisioning-capi": "core", // legacy embedded CAPI (< Rancher 2.14)
+	"rancher-turtles":           "core", // default CAPI integration (2.13+; only path in 2.14+)
 	"system-upgrade-controller": "core",
 	"remotedialer-proxy":        "core",
 	"rancher-csp-adapter":       "core",

@@ -1339,6 +1339,8 @@ func inferChartFromImage(img, componentLabel string) string {
 			return "fleet"
 		case strings.Contains(name, "webhook"):
 			return "rancher-webhook"
+		case strings.Contains(name, "turtles"):
+			return "rancher-turtles"
 		case strings.Contains(name, "shell"):
 			return "rancher-shell"
 		case strings.Contains(name, "system-upgrade"):
@@ -1397,7 +1399,7 @@ func inferChartVersion(imgs []string) string {
 
 // basicComponentDescriptions explains Essentials subgroups in the Step 3 tree.
 var basicComponentDescriptions = map[string]string{
-	"Rancher":                 "Core Rancher server, agent, webhooks, Fleet GitOps, and auto-deployed system charts.",
+	"Rancher":                 "Core Rancher server, agent, webhooks, Fleet GitOps, Rancher Turtles (CAPI), and auto-deployed system charts.",
 	"CNI":                     "Container network interface (Calico, Canal, Flannel, etc.) — pod networking for your cluster.",
 	"K3s":                     "Lightweight Kubernetes distribution images bundled with your selected K3s version(s).",
 	"RKE2":                    "RKE2 (Rancher Kubernetes Engine 2) node and system images for your selected version(s).",
@@ -1413,14 +1415,14 @@ var chartCategoryDescriptions = map[string]string{
 	"storage":        "Longhorn, Harvester, CSI drivers, and persistent storage operators.",
 	"security":       "NeuVector, Gatekeeper, and runtime security tooling.",
 	"cis":            "CIS benchmark scanning and compliance reporting.",
-	"provisioning":   "Cloud provider operators for EKS, GKE, AKS, vSphere, and CAPI.",
+	"provisioning":   "Cloud provider operators for EKS, GKE, AKS, vSphere.",
 	"networking":     "Service mesh (Istio), SR-IOV, and advanced networking add-ons.",
-	"cluster-api":    "Cluster API providers and Rancher Turtles extensions.",
+	"cluster-api":    "Optional upstream CAPI infrastructure providers (CAPA, CAPV, …) via CAPIProvider — not Rancher Turtles itself.",
 	"os-management":  "Elemental and edge/OS lifecycle management.",
 	"support":        "Supportability and diagnostic tools.",
 	"other":          "Additional marketplace charts not in a named category.",
 	"fleet":          "Fleet GitOps — deploy applications and multi-cluster workloads from Git.",
-	"system":         "Charts auto-deployed by Rancher (webhook, provisioning-capi, system-upgrade).",
+	"system":         "Charts auto-deployed by Rancher (webhook, Fleet, Turtles/CAPI, system-upgrade, cert-manager).",
 	"cert-manager":   "TLS certificate controller required before installing Rancher with Helm.",
 }
 
@@ -1745,17 +1747,22 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 	}
 	basicImgs = filteredBasicImgs
 
-	// Add images from Rancher core system charts (default Helm charts deployed by Rancher)
-	// These are always part of Basic even if not in component-based basicImgs
+	// Add images from Rancher core system charts (default Helm charts deployed by Rancher).
+	// These are always part of Basic even if not in component-based basicImgs.
+	// Rancher ≥2.14 removed embedded provisioning-capi; Turtles is the CAPI integration.
+	// Rancher ≥2.13 enables Turtles by default — keep it in Essentials for all versions we care about.
 	coreSystemChartNames := []string{
 		"rancher",                   // Main Rancher server Helm chart (rancher-rancher)
 		"rancher-rancher",           // Main Rancher server Helm chart (alternate name)
 		"rancher-webhook",           // Admission webhooks for Rancher resources
-		"rancher-provisioning-capi", // Cluster API provisioning
-		"rancher-turtles",           // CAPI extension for Rancher
+		"rancher-turtles",           // CAPI extension (default 2.13+; only path in 2.14+)
 		"system-upgrade-controller", // Manages system upgrades
 		"remotedialer-proxy",        // Proxy for remote dialer connections
 		"cert-manager",              // Prerequisite for Rancher Helm install (TLS)
+	}
+	if ok, _ := utils.SemverCompare(cc.rancherVersion, "v2.14.0-0"); ok < 0 {
+		// Legacy embedded Cluster API (removed in Rancher 2.14)
+		coreSystemChartNames = append(coreSystemChartNames, "rancher-provisioning-capi")
 	}
 	basicImgSet := make(map[string]bool)
 	for _, img := range basicImgs {
@@ -2017,15 +2024,23 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 			cc.applyChartMetadata(&chartNode, name)
 
 			// Categorize: Basic charts = ONLY auto-deployed Rancher system charts
+			// Categorize: Basic charts = auto-deployed / required Rancher system charts.
+			// Turtles is Essentials (2.13+ default; only CAPI path in 2.14+).
+			// provisioning-capi is Essentials only for Rancher < 2.14.
+			legacyEmbeddedCAPI := false
+			if ok, _ := utils.SemverCompare(cc.rancherVersion, "v2.14.0-0"); ok < 0 {
+				legacyEmbeddedCAPI = true
+			}
 			isBasic := name == "fleet" || name == "fleet-crd" || name == "fleet-agent" || name == "fleet-controller" ||
 				name == "rancher-webhook" ||
-				name == "rancher-provisioning-capi" ||
+				name == "rancher-turtles" ||
 				name == "system-upgrade-controller" ||
 				name == "remotedialer-proxy" ||
 				name == "ui-plugin-operator" || name == "ui-plugin-operator-crd" ||
-				name == "cert-manager"
+				name == "cert-manager" ||
+				(legacyEmbeddedCAPI && name == "rancher-provisioning-capi")
 			if isBasic {
-				if chartNode.Category == "" {
+				if chartNode.Category == "" || chartNode.Category == "cluster-api" {
 					chartNode.Category = "system"
 				}
 				if chartNode.Description == "" {
@@ -2066,7 +2081,8 @@ func (cc *genesisCmd) buildGenesisTree() (roots []treeNode, basicCharts []treeNo
 					} else if strings.Contains(nameLower, "cis") || strings.Contains(nameLower, "compliance") ||
 						strings.Contains(nameLower, "security-scan") {
 						category = "cis"
-					} else if strings.Contains(nameLower, "cluster-api") || strings.Contains(nameLower, "turtles") {
+					} else if strings.Contains(nameLower, "cluster-api") {
+						// Upstream CAPI providers only — turtles is Essentials (isBasic above)
 						category = "cluster-api"
 					} else if strings.Contains(nameLower, "elemental") {
 						category = "os-management"

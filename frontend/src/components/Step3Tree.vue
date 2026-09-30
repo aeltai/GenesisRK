@@ -1780,7 +1780,7 @@ spec:
         <p class="glossary-intro">The tree mirrors how Rancher bundles images: <strong>Essentials</strong> are required for your cluster profile; <strong>AddOns</strong> are optional Helm charts from the Rancher catalog.</p>
         <dl class="glossary-list">
           <dt>Essentials / Rancher</dt>
-          <dd>Management server, agent, webhooks, Fleet (GitOps), cert-manager (TLS prerequisite), and system charts Rancher auto-installs.</dd>
+          <dd>Management server, agent, webhooks, Fleet (GitOps), Rancher Turtles (CAPI — default 2.13+, only path in 2.14+), cert-manager (TLS), and system charts Rancher auto-installs.</dd>
           <dt>CNI</dt>
           <dd>Pod networking — Calico, Canal, Flannel, or Cilium depending on your Step 1 choice.</dd>
           <dt>RKE2 / K3s</dt>
