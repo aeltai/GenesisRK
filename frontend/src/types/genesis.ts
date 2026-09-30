@@ -37,6 +37,10 @@ export interface GenerateRequest {
   includePartnerCharts: boolean
   includeUIPluginCharts: boolean
   includeCertManager: boolean
+  /** SUSE Observability Agent images from charts.rancher.com prime/suse-observability. */
+  includeSuseObservability?: boolean
+  /** SUSE Observability self-hosted platform (server) images — elasticsearch, kafka, hbase, etc. */
+  includeSuseObservabilityServer?: boolean
   appCollectionAPIUser: string
   appCollectionAPIPassword: string
   distros: string[]

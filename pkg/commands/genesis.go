@@ -149,8 +149,10 @@ type genesisCmd struct {
 	includeAppCollectionCharts bool                        // include charts from dp.apps.rancher.io (Application Collection)
 	includePartnerCharts       bool                        // include charts from rancher/partner-charts
 	includeUIPluginCharts      bool                        // include charts from rancher/ui-plugin-charts
-	includeCertManager         bool                        // include jetstack cert-manager (required for Rancher Helm install; default true)
-	appCollectionAPIUser       string                      // username for api.apps.rancher.io (set when user is prompted)
+	includeCertManager              bool // include jetstack cert-manager (required for Rancher Helm install; default true)
+	includeSuseObservability        bool // include SUSE Observability Agent images (Prime Helm)
+	includeSuseObservabilityServer  bool // include SUSE Observability self-hosted platform images
+	appCollectionAPIUser            string                      // username for api.apps.rancher.io (set when user is prompted)
 	appCollectionAPIPassword   string                      // password/token for api.apps.rancher.io
 	appCollectionChartRefs     []string                    // OCI chart refs (oci://dp.apps.rancher.io/charts/<slug>) for tree display
 	appCollectionApps          []appcollection.Application // full metadata (name, description, logo, category) for tree display
@@ -378,8 +380,10 @@ type generateListConfig struct {
 	IncludeAppCollectionCharts *bool               `yaml:"includeAppCollectionCharts"` // true = also include charts from dp.apps.rancher.io (requires helm registry login)
 	IncludePartnerCharts       *bool               `yaml:"includePartnerCharts"`       // true = also include rancher/partner-charts
 	IncludeUIPluginCharts      *bool               `yaml:"includeUIPluginCharts"`      // true = also include rancher/ui-plugin-charts
-	IncludeCertManager         *bool               `yaml:"includeCertManager"`         // true = include jetstack cert-manager images (default true)
-	Scan                       *scanConfig         `yaml:"scan"`                       // Optional scan configuration
+	IncludeCertManager             *bool               `yaml:"includeCertManager"`             // true = include jetstack cert-manager images (default true)
+	IncludeSuseObservability       *bool               `yaml:"includeSuseObservability"`       // true = include SUSE Observability Agent
+	IncludeSuseObservabilityServer *bool               `yaml:"includeSuseObservabilityServer"` // true = include SUSE Observability self-hosted server
+	Scan                           *scanConfig         `yaml:"scan"`                           // Optional scan configuration
 }
 
 type scanConfig struct {
@@ -436,6 +440,12 @@ func (cc *genesisCmd) loadConfigFile() error {
 	}
 	if config.IncludeCertManager != nil {
 		cc.includeCertManager = *config.IncludeCertManager
+	}
+	if config.IncludeSuseObservability != nil {
+		cc.includeSuseObservability = *config.IncludeSuseObservability
+	}
+	if config.IncludeSuseObservabilityServer != nil {
+		cc.includeSuseObservabilityServer = *config.IncludeSuseObservabilityServer
 	}
 
 	// Set Windows support (Linux only vs Linux + Windows node images)
@@ -632,20 +642,24 @@ func (cc *genesisCmd) writeSaveConfig() error {
 	includePartner := cc.includePartnerCharts
 	includeUIPlugins := cc.includeUIPluginCharts
 	includeCertManager := cc.includeCertManager
+	includeSuseObservability := cc.includeSuseObservability
+	includeSuseObservabilityServer := cc.includeSuseObservabilityServer
 	includeWin := cc.interactiveIncludeWindows
 	config := generateListConfig{
-		Distros:                    distrosClean,
-		CNI:                        cc.interactiveSelectedCNI,
-		LoadBalancer:               &includeLB,
-		IncludeWindows:             &includeWin,
-		Versions:                   versions,
-		Groups:                     cc.interactiveSelectedComponentIDs,
-		Charts:                     cc.interactiveSelectedChartNames,
-		SourceType:                 sourceType,
-		IncludeAppCollectionCharts: &includeAppCollection,
-		IncludePartnerCharts:       &includePartner,
-		IncludeUIPluginCharts:      &includeUIPlugins,
-		IncludeCertManager:         &includeCertManager,
+		Distros:                        distrosClean,
+		CNI:                            cc.interactiveSelectedCNI,
+		LoadBalancer:                   &includeLB,
+		IncludeWindows:                 &includeWin,
+		Versions:                       versions,
+		Groups:                         cc.interactiveSelectedComponentIDs,
+		Charts:                         cc.interactiveSelectedChartNames,
+		SourceType:                     sourceType,
+		IncludeAppCollectionCharts:     &includeAppCollection,
+		IncludePartnerCharts:           &includePartner,
+		IncludeUIPluginCharts:          &includeUIPlugins,
+		IncludeCertManager:             &includeCertManager,
+		IncludeSuseObservability:       &includeSuseObservability,
+		IncludeSuseObservabilityServer: &includeSuseObservabilityServer,
 	}
 	if cc.scan {
 		config.Scan = &scanConfig{
@@ -2942,6 +2956,20 @@ func (cc *genesisCmd) run(ctx context.Context) error {
 	if err == nil && cc.includeCertManager && cc.generator != nil {
 		listgenerator.MergeCertManagerImages(cc.generator.LinuxImages, listgenerator.DefaultCertManagerVersion)
 		logrus.Infof("Included cert-manager %s images (Rancher Helm install prerequisite)", listgenerator.DefaultCertManagerVersion)
+	}
+	if err == nil && cc.includeSuseObservability && cc.generator != nil {
+		n, ver, o11yErr := listgenerator.MergeSuseObservabilityAgentImages(ctx, cc.generator.LinuxImages)
+		if o11yErr != nil {
+			return fmt.Errorf("SUSE Observability Agent images: %w", o11yErr)
+		}
+		logrus.Infof("Included SUSE Observability Agent %s (%d images)", ver, n)
+	}
+	if err == nil && cc.includeSuseObservabilityServer && cc.generator != nil {
+		n, ver, o11yErr := listgenerator.MergeSuseObservabilityServerImages(ctx, cc.generator.LinuxImages)
+		if o11yErr != nil {
+			return fmt.Errorf("SUSE Observability Server images: %w", o11yErr)
+		}
+		logrus.Infof("Included SUSE Observability Server %s (%d images)", ver, n)
 	}
 
 	// Cleanup cache (if exists) after generate image list. Serve mode keeps

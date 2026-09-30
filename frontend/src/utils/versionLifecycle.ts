@@ -360,6 +360,7 @@ const COMPONENT_LIFECYCLE: Record<string, ComponentLifecycleAnnotation> = {
   'prometheus-federator': { component: 'Prometheus Federator', status: 'supported', source: 'rancher/charts' },
   'rancher-alerting-drivers': { component: 'Alerting Drivers', status: 'supported', source: 'rancher/charts' },
   'suse-observability-agent': { component: 'SUSE Observability Agent', status: 'supported', source: 'SUSE Observability' },
+  'suse-observability': { component: 'SUSE Observability Server', status: 'supported', source: 'SUSE Observability' },
   'rancher-logging': { component: 'rancher-logging', status: 'supported', source: 'rancher/charts (Fluent Bit / Fluentd)' },
   'rancher-backup': { component: 'rancher-backup', status: 'supported', source: 'rancher/charts' },
   fluentbit: { component: 'Fluent Bit', status: 'supported', source: 'fluent/fluent-bit' },

@@ -18,9 +18,16 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
-# Runtime image (include gpgme runtime so the binary can load)
+# Runtime image (include gpgme runtime so the binary can load; helm for
+# SUSE Observability Agent chart templating — same method as SUSE air-gap docs)
 FROM alpine:3.20
-RUN apk add --no-cache ca-certificates gpgme
+ARG HELM_VERSION=v3.16.4
+RUN apk add --no-cache ca-certificates gpgme curl tar \
+  && curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" \
+    | tar -xz -C /tmp \
+  && mv /tmp/linux-amd64/helm /usr/local/bin/helm \
+  && rm -rf /tmp/linux-amd64 \
+  && helm version --short
 WORKDIR /app
 COPY --from=go-builder /hangar /app/hangar
 COPY --from=frontend-builder /app/dist /app/frontend/dist

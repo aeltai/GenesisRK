@@ -303,8 +303,10 @@ type GenerateRequest struct {
 	IncludePartnerCharts       bool     `json:"includePartnerCharts"`
 	IncludeUIPluginCharts      bool     `json:"includeUIPluginCharts"`
 	IncludeCertManager         *bool    `json:"includeCertManager,omitempty"` // nil/omitted = true (Rancher Helm prerequisite)
-	AppCollectionAPIUser       string   `json:"appCollectionAPIUser"`
-	AppCollectionAPIPassword   string   `json:"appCollectionAPIPassword"`
+	IncludeSuseObservability       bool     `json:"includeSuseObservability"`
+	IncludeSuseObservabilityServer bool     `json:"includeSuseObservabilityServer"`
+	AppCollectionAPIUser           string   `json:"appCollectionAPIUser"`
+	AppCollectionAPIPassword       string   `json:"appCollectionAPIPassword"`
 	Distros                    []string `json:"distros"`
 	CNI                        string   `json:"cni"`
 	CNIs                       []string `json:"cnis,omitempty"` // multiple CNIs (both distros); takes precedence over CNI
@@ -897,6 +899,8 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		if req.IncludeCertManager != nil {
 			cc.includeCertManager = *req.IncludeCertManager
 		}
+		cc.includeSuseObservability = req.IncludeSuseObservability
+		cc.includeSuseObservabilityServer = req.IncludeSuseObservabilityServer
 		cc.keepChartCache = true // serve mode: reuse chart clones across generate requests
 		cc.appCollectionAPIUser = req.AppCollectionAPIUser
 		cc.appCollectionAPIPassword = req.AppCollectionAPIPassword

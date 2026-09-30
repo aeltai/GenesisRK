@@ -40,6 +40,8 @@ const includeAppCollection = defineModel<boolean>('includeAppCollection', { defa
 const includePartnerCharts = defineModel<boolean>('includePartnerCharts', { default: false })
 const includeUIPluginCharts = defineModel<boolean>('includeUIPluginCharts', { default: false })
 const includeCertManager = defineModel<boolean>('includeCertManager', { default: true })
+const includeSuseObservability = defineModel<boolean>('includeSuseObservability', { default: false })
+const includeSuseObservabilityServer = defineModel<boolean>('includeSuseObservabilityServer', { default: false })
 const appUser = defineModel<string>('appUser', { default: '' })
 const appPassword = defineModel<string>('appPassword', { default: '' })
 const distros = defineModel<string[]>('distros', { default: () => ['rke2'] })
@@ -516,6 +518,14 @@ onUnmounted(() => {
       <label class="checkbox-label" title="TLS certificate controller from jetstack — install before Rancher Helm chart. Images: quay.io/jetstack/cert-manager-*.">
         <input v-model="includeCertManager" type="checkbox" />
         Include cert-manager (required for Rancher install)
+      </label>
+      <label class="checkbox-label" title="SUSE Observability Agent from charts.rancher.com/server-charts/prime/suse-observability — same images as o11y-agent-get-images.sh (cluster agent for Rancher-managed clusters).">
+        <input v-model="includeSuseObservability" type="checkbox" />
+        Include SUSE Observability Agent
+      </label>
+      <label class="checkbox-label" title="Self-hosted SUSE Observability platform (suse-observability chart) — same images as o11y-get-images.sh (~37 images: ES, Kafka, HBase, ClickHouse, …). Not required just to run the Agent against SaaS/hosted Observability.">
+        <input v-model="includeSuseObservabilityServer" type="checkbox" />
+        Include SUSE Observability Server (self-hosted)
       </label>
       <label class="checkbox-label">
         <input v-model="includePartnerCharts" type="checkbox" />

@@ -724,6 +724,7 @@ var chartCategoryByName = map[string]string{
 	"rancher-alerting-drivers":   "monitoring",
 	"rancher-pushprox":           "monitoring",
 	"suse-observability-agent":   "monitoring",
+	"suse-observability":         "monitoring",
 
 	// Logging
 	"rancher-logging":     "logging",

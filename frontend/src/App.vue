@@ -93,6 +93,8 @@ const genRequest = reactive<GenerateRequest>({
   includePartnerCharts: false,
   includeUIPluginCharts: false,
   includeCertManager: true,
+  includeSuseObservability: false,
+  includeSuseObservabilityServer: false,
   appCollectionAPIUser: '',
   appCollectionAPIPassword: '',
   distros: ['rke2'],
@@ -420,6 +422,8 @@ function backToStep1() {
               v-model:include-partner-charts="genRequest.includePartnerCharts"
               v-model:includeUIPluginCharts="genRequest.includeUIPluginCharts"
               v-model:include-cert-manager="genRequest.includeCertManager"
+              v-model:include-suse-observability="genRequest.includeSuseObservability"
+              v-model:include-suse-observability-server="genRequest.includeSuseObservabilityServer"
               v-model:app-user="genRequest.appCollectionAPIUser"
               v-model:app-password="genRequest.appCollectionAPIPassword"
               v-model:distros="genRequest.distros"
