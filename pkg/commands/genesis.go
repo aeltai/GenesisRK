@@ -2592,6 +2592,31 @@ func excludeOptionalStorageFromEssentials(imgLower string) bool {
 	return false
 }
 
+// normalizeDistroVersionTag maps KDM/UI version strings and image tags onto a
+// comparable form. Rancher UI/KDM use "+", image tags use "-":
+//
+//	v1.35.8+k3s1  <->  v1.35.8-k3s1
+//	v1.35.8+rke2r1 <-> v1.35.8-rke2r1
+func normalizeDistroVersionTag(v string) string {
+	return strings.ReplaceAll(strings.TrimSpace(v), "+", "-")
+}
+
+func tagMatchesVersionSelection(tag string, selected map[string]bool) bool {
+	if len(selected) == 0 {
+		return true
+	}
+	tagNorm := normalizeDistroVersionTag(tag)
+	if selected[tag] || selected[tagNorm] {
+		return true
+	}
+	for sel := range selected {
+		if normalizeDistroVersionTag(sel) == tagNorm {
+			return true
+		}
+	}
+	return false
+}
+
 // filterImagesByVersions filters images based on selected Kubernetes versions.
 // For K3s: matches images like rancher/k3s-upgrade:v1.28.15-k3s1
 // For RKE2: matches images like rancher/rke2-upgrade:v1.28.15-rke2r1
@@ -2634,46 +2659,16 @@ func filterImagesByVersions(images []string, k3sVers, rke2Vers, rkeVers string) 
 	for _, img := range images {
 		include := false
 
-		// Check if it's a K3s image (k3s-upgrade, system-agent-installer-k3s, or from k3s-images.txt)
+		// K3s installer/upgrade images — tag uses "-", selection often uses "+"
 		if strings.Contains(img, "k3s-upgrade:") || strings.Contains(img, "system-agent-installer-k3s:") {
-			if len(k3sVersMap) == 0 {
-				include = true // "all" selected
-			} else {
-				// Extract version from tag like v1.28.15-k3s1
-				parts := strings.Split(img, ":")
-				if len(parts) == 2 {
-					tag := parts[1]
-					// Remove -k3s1, -k3s2 suffix
-					tag = strings.TrimSuffix(tag, "-k3s1")
-					tag = strings.TrimSuffix(tag, "-k3s2")
-					tag = strings.TrimSuffix(tag, "-k3s3")
-					// Check if this version matches
-					if k3sVersMap[tag] {
-						include = true
-					}
-				}
+			parts := strings.Split(img, ":")
+			if len(parts) == 2 {
+				include = tagMatchesVersionSelection(parts[1], k3sVersMap)
 			}
 		} else if strings.Contains(img, "rke2-upgrade:") || strings.Contains(img, "system-agent-installer-rke2:") {
-			// RKE2 image
-			if len(rke2VersMap) == 0 {
-				include = true // "all" selected
-			} else {
-				parts := strings.Split(img, ":")
-				if len(parts) == 2 {
-					tag := parts[1]
-					// Remove -rke2r1, -rke2r2 suffix
-					for strings.Contains(tag, "-rke2r") {
-						idx := strings.LastIndex(tag, "-rke2r")
-						if idx > 0 {
-							tag = tag[:idx]
-							break
-						}
-						break
-					}
-					if rke2VersMap[tag] {
-						include = true
-					}
-				}
+			parts := strings.Split(img, ":")
+			if len(parts) == 2 {
+				include = tagMatchesVersionSelection(parts[1], rke2VersMap)
 			}
 		} else if strings.Contains(img, "rke") && !strings.Contains(img, "rke2") {
 			// RKE1 image (no version tags, include if RKE1 is selected)

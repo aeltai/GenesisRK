@@ -71,6 +71,50 @@ func Test_buildChartRepoRoot_SkipsWhenFlagOff(t *testing.T) {
 	}
 }
 
+func Test_filterImagesByVersions_PlusVsDashTags(t *testing.T) {
+	images := []string{
+		"rancher/k3s-upgrade:v1.35.8-k3s1",
+		"rancher/system-agent-installer-k3s:v1.35.8-k3s1",
+		"rancher/rke2-upgrade:v1.35.8-rke2r1",
+		"rancher/system-agent-installer-rke2:v1.35.8-rke2r1",
+		"rancher/local-path-provisioner:v0.0.37",
+		"registry.rancher.com/rancher/rke2-runtime:v1.35.8-rke2r1",
+		"rancher/k3s-upgrade:v1.34.5-k3s1",
+	}
+	// UI/KDM selection uses '+'
+	got := filterImagesByVersions(images, "v1.35.8+k3s1", "v1.35.8+rke2r1", "")
+	want := map[string]bool{
+		"rancher/k3s-upgrade:v1.35.8-k3s1":                  true,
+		"rancher/system-agent-installer-k3s:v1.35.8-k3s1":   true,
+		"rancher/rke2-upgrade:v1.35.8-rke2r1":                true,
+		"rancher/system-agent-installer-rke2:v1.35.8-rke2r1": true,
+		"rancher/local-path-provisioner:v0.0.37":             true,
+		"registry.rancher.com/rancher/rke2-runtime:v1.35.8-rke2r1": true,
+	}
+	gotSet := map[string]bool{}
+	for _, img := range got {
+		gotSet[img] = true
+	}
+	for img := range want {
+		if !gotSet[img] {
+			t.Errorf("expected to KEEP %s", img)
+		}
+	}
+	if gotSet["rancher/k3s-upgrade:v1.34.5-k3s1"] {
+		t.Errorf("expected to DROP other k3s version")
+	}
+}
+
+func Test_tagMatchesVersionSelection(t *testing.T) {
+	sel := map[string]bool{"v1.35.8+k3s1": true}
+	if !tagMatchesVersionSelection("v1.35.8-k3s1", sel) {
+		t.Fatal("dash tag should match plus selection")
+	}
+	if tagMatchesVersionSelection("v1.34.5-k3s1", sel) {
+		t.Fatal("other version must not match")
+	}
+}
+
 func Test_excludeOptionalStorageFromEssentials(t *testing.T) {
 	keep := []string{
 		"registry.rancher.com/rancher/rke2-cloud-provider:v1.35.8-0.20260817193936-20fc9c33a412-build20260820",
