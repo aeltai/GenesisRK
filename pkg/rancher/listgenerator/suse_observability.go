@@ -82,56 +82,121 @@ type helmChartIndex struct {
 	} `yaml:"entries"`
 }
 
-// ResolveSuseObservabilityChart returns the latest non-prerelease chart version
-// and download URL for the given chart name in the Prime Observability repo.
-func ResolveSuseObservabilityChart(ctx context.Context, chartName string) (version, downloadURL string, err error) {
+func fetchSuseObservabilityIndex(ctx context.Context) (*helmChartIndex, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, SuseObservabilityChartsIndexURL, nil)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	client := &http.Client{Timeout: 60 * time.Second}
 	resp, err := utils.HTTPClientDoWithRetry(ctx, client, req)
 	if err != nil {
-		return "", "", fmt.Errorf("suse-observability index: %w", err)
+		return nil, fmt.Errorf("suse-observability index: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", fmt.Errorf("suse-observability index: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("suse-observability index: HTTP %d", resp.StatusCode)
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	var idx helmChartIndex
 	if err := yaml.Unmarshal(body, &idx); err != nil {
-		return "", "", fmt.Errorf("suse-observability index parse: %w", err)
+		return nil, fmt.Errorf("suse-observability index parse: %w", err)
+	}
+	return &idx, nil
+}
+
+func chartEntryURL(chartName, version, rawURL string) string {
+	if rawURL == "" {
+		return fmt.Sprintf("%s/%s-%s.tgz", SuseObservabilityChartsBaseURL, chartName, version)
+	}
+	if strings.HasPrefix(rawURL, "http://") || strings.HasPrefix(rawURL, "https://") {
+		return rawURL
+	}
+	return strings.TrimRight(SuseObservabilityChartsBaseURL, "/") + "/" + strings.TrimLeft(rawURL, "/")
+}
+
+func isPreReleaseChartVersion(v string) bool {
+	l := strings.ToLower(v)
+	return strings.Contains(l, "pre") || strings.Contains(l, "rc") || strings.Contains(l, "alpha") || strings.Contains(l, "beta")
+}
+
+// ListSuseObservabilityChartVersions returns chart versions from the Prime
+// Observability Helm index (newest first). When includePre is false, prerelease
+// versions are omitted.
+func ListSuseObservabilityChartVersions(ctx context.Context, chartName string, includePre bool) ([]string, error) {
+	idx, err := fetchSuseObservabilityIndex(ctx)
+	if err != nil {
+		return nil, err
+	}
+	entries := idx.Entries[chartName]
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("suse-observability index: no %s entries", chartName)
+	}
+	seen := make(map[string]bool)
+	out := make([]string, 0, len(entries))
+	for _, e := range entries {
+		v := strings.TrimSpace(e.Version)
+		if v == "" || seen[v] {
+			continue
+		}
+		if !includePre && isPreReleaseChartVersion(v) {
+			continue
+		}
+		seen[v] = true
+		out = append(out, v)
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("suse-observability index: no usable %s versions", chartName)
+	}
+	return out, nil
+}
+
+// ResolveSuseObservabilityChart returns a chart version and download URL.
+// When wantVersion is empty, the latest non-prerelease is used. When set, that
+// exact version is resolved (including prereleases).
+func ResolveSuseObservabilityChart(ctx context.Context, chartName, wantVersion string) (version, downloadURL string, err error) {
+	idx, err := fetchSuseObservabilityIndex(ctx)
+	if err != nil {
+		return "", "", err
 	}
 	entries := idx.Entries[chartName]
 	if len(entries) == 0 {
 		return "", "", fmt.Errorf("suse-observability index: no %s entries", chartName)
 	}
+	wantVersion = strings.TrimSpace(wantVersion)
+	if wantVersion != "" {
+		for _, e := range entries {
+			v := strings.TrimSpace(e.Version)
+			if v != wantVersion {
+				continue
+			}
+			u := ""
+			if len(e.URLs) > 0 {
+				u = e.URLs[0]
+			}
+			return v, chartEntryURL(chartName, v, u), nil
+		}
+		return "", "", fmt.Errorf("suse-observability: chart %s version %q not found in index", chartName, wantVersion)
+	}
 	for _, e := range entries {
 		v := strings.TrimSpace(e.Version)
-		if v == "" || strings.Contains(strings.ToLower(v), "pre") {
+		if v == "" || isPreReleaseChartVersion(v) {
 			continue
 		}
 		u := ""
 		if len(e.URLs) > 0 {
 			u = e.URLs[0]
 		}
-		if u == "" {
-			u = fmt.Sprintf("%s/%s-%s.tgz", SuseObservabilityChartsBaseURL, chartName, v)
-		} else if !strings.HasPrefix(u, "http://") && !strings.HasPrefix(u, "https://") {
-			u = strings.TrimRight(SuseObservabilityChartsBaseURL, "/") + "/" + strings.TrimLeft(u, "/")
-		}
-		return v, u, nil
+		return v, chartEntryURL(chartName, v, u), nil
 	}
 	return "", "", fmt.Errorf("suse-observability index: no stable %s version", chartName)
 }
 
-// ResolveSuseObservabilityAgentChart is a convenience wrapper for the agent chart.
+// ResolveSuseObservabilityAgentChart is a convenience wrapper for the latest agent chart.
 func ResolveSuseObservabilityAgentChart(ctx context.Context) (version, downloadURL string, err error) {
-	return ResolveSuseObservabilityChart(ctx, SuseObservabilityAgentChartName)
+	return ResolveSuseObservabilityChart(ctx, SuseObservabilityAgentChartName, "")
 }
 
 func requireHelm() error {
@@ -141,8 +206,8 @@ func requireHelm() error {
 	return nil
 }
 
-func downloadSuseObservabilityChart(ctx context.Context, chartName string) (tgzPath, version, tmpDir string, err error) {
-	version, url, err := ResolveSuseObservabilityChart(ctx, chartName)
+func downloadSuseObservabilityChart(ctx context.Context, chartName, wantVersion string) (tgzPath, version, tmpDir string, err error) {
+	version, url, err := ResolveSuseObservabilityChart(ctx, chartName, wantVersion)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -208,11 +273,12 @@ func sortedKeys(m map[string]bool) []string {
 
 // FetchSuseObservabilityAgentImages downloads the agent chart and extracts
 // images via `helm template` (same values as o11y-agent-get-images.sh).
-func FetchSuseObservabilityAgentImages(ctx context.Context) (images []string, version string, err error) {
+// wantVersion empty = latest stable.
+func FetchSuseObservabilityAgentImages(ctx context.Context, wantVersion string) (images []string, version string, err error) {
 	if err := requireHelm(); err != nil {
 		return nil, "", err
 	}
-	tgzPath, version, tmpDir, err := downloadSuseObservabilityChart(ctx, SuseObservabilityAgentChartName)
+	tgzPath, version, tmpDir, err := downloadSuseObservabilityChart(ctx, SuseObservabilityAgentChartName, wantVersion)
 	if err != nil {
 		return nil, version, err
 	}
@@ -239,12 +305,12 @@ func FetchSuseObservabilityAgentImages(ctx context.Context) (images []string, ve
 
 // FetchSuseObservabilityServerImages downloads the self-hosted platform chart
 // and extracts images via `helm template` (same values as o11y-get-images.sh:
-// Distributed + Mono HBase modes).
-func FetchSuseObservabilityServerImages(ctx context.Context) (images []string, version string, err error) {
+// Distributed + Mono HBase modes). wantVersion empty = latest stable.
+func FetchSuseObservabilityServerImages(ctx context.Context, wantVersion string) (images []string, version string, err error) {
 	if err := requireHelm(); err != nil {
 		return nil, "", err
 	}
-	tgzPath, version, tmpDir, err := downloadSuseObservabilityChart(ctx, SuseObservabilityServerChartName)
+	tgzPath, version, tmpDir, err := downloadSuseObservabilityChart(ctx, SuseObservabilityServerChartName, wantVersion)
 	if err != nil {
 		return nil, version, err
 	}
@@ -266,11 +332,12 @@ func FetchSuseObservabilityServerImages(ctx context.Context) (images []string, v
 }
 
 // MergeSuseObservabilityAgentImages fetches agent images and merges them.
-func MergeSuseObservabilityAgentImages(ctx context.Context, linuxImages map[string]map[string]bool) (int, string, error) {
+// wantVersion empty = latest stable.
+func MergeSuseObservabilityAgentImages(ctx context.Context, linuxImages map[string]map[string]bool, wantVersion string) (int, string, error) {
 	if linuxImages == nil {
 		return 0, "", nil
 	}
-	images, version, err := FetchSuseObservabilityAgentImages(ctx)
+	images, version, err := FetchSuseObservabilityAgentImages(ctx, wantVersion)
 	if err != nil {
 		return 0, "", err
 	}
@@ -284,11 +351,12 @@ func MergeSuseObservabilityAgentImages(ctx context.Context, linuxImages map[stri
 }
 
 // MergeSuseObservabilityServerImages fetches self-hosted platform images and merges them.
-func MergeSuseObservabilityServerImages(ctx context.Context, linuxImages map[string]map[string]bool) (int, string, error) {
+// wantVersion empty = latest stable.
+func MergeSuseObservabilityServerImages(ctx context.Context, linuxImages map[string]map[string]bool, wantVersion string) (int, string, error) {
 	if linuxImages == nil {
 		return 0, "", nil
 	}
-	images, version, err := FetchSuseObservabilityServerImages(ctx)
+	images, version, err := FetchSuseObservabilityServerImages(ctx, wantVersion)
 	if err != nil {
 		return 0, "", err
 	}

@@ -41,6 +41,10 @@ export interface GenerateRequest {
   includeSuseObservability?: boolean
   /** SUSE Observability self-hosted platform (server) images — elasticsearch, kafka, hbase, etc. */
   includeSuseObservabilityServer?: boolean
+  /** Chart version for suse-observability-agent; empty = latest stable. */
+  suseObservabilityAgentVersion?: string
+  /** Chart version for suse-observability (server); empty = latest stable. */
+  suseObservabilityServerVersion?: string
   appCollectionAPIUser: string
   appCollectionAPIPassword: string
   distros: string[]

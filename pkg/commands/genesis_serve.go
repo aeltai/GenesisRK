@@ -19,6 +19,7 @@ import (
 
 	"github.com/cnrancher/hangar/pkg/image/scan"
 	"github.com/cnrancher/hangar/pkg/rancher/kdmimages"
+	"github.com/cnrancher/hangar/pkg/rancher/listgenerator"
 	"github.com/cnrancher/hangar/pkg/utils"
 	"github.com/google/uuid"
 	"github.com/rancher/rke/types/kdm"
@@ -303,10 +304,12 @@ type GenerateRequest struct {
 	IncludePartnerCharts       bool     `json:"includePartnerCharts"`
 	IncludeUIPluginCharts      bool     `json:"includeUIPluginCharts"`
 	IncludeCertManager         *bool    `json:"includeCertManager,omitempty"` // nil/omitted = true (Rancher Helm prerequisite)
-	IncludeSuseObservability       bool     `json:"includeSuseObservability"`
-	IncludeSuseObservabilityServer bool     `json:"includeSuseObservabilityServer"`
-	AppCollectionAPIUser           string   `json:"appCollectionAPIUser"`
-	AppCollectionAPIPassword       string   `json:"appCollectionAPIPassword"`
+	IncludeSuseObservability         bool   `json:"includeSuseObservability"`
+	IncludeSuseObservabilityServer   bool   `json:"includeSuseObservabilityServer"`
+	SuseObservabilityAgentVersion    string `json:"suseObservabilityAgentVersion"`
+	SuseObservabilityServerVersion   string `json:"suseObservabilityServerVersion"`
+	AppCollectionAPIUser             string `json:"appCollectionAPIUser"`
+	AppCollectionAPIPassword         string `json:"appCollectionAPIPassword"`
 	Distros                    []string `json:"distros"`
 	CNI                        string   `json:"cni"`
 	CNIs                       []string `json:"cnis,omitempty"` // multiple CNIs (both distros); takes precedence over CNI
@@ -390,6 +393,7 @@ func newGenesisServeCmd(parent *genesisCmd) {
 			mux := http.NewServeMux()
 			// Register API routes first so they take precedence over static "/" (important for Go < 1.22)
 			mux.HandleFunc("/api/rancher-versions", handleRancherVersions)
+			mux.HandleFunc("/api/suse-observability-versions", handleSuseObservabilityVersions)
 			mux.HandleFunc("/api/step1-options", handleStep1Options)
 		mux.HandleFunc("/api/generate", handleGenerate)
 		mux.HandleFunc("/api/export", handleExport)
@@ -491,6 +495,44 @@ func handleRancherVersions(w http.ResponseWriter, r *http.Request) {
 	}
 	genesisAPICache.set(cacheKey, body, rancherVersionsCacheTTL)
 	writeCachedJSON(w, body, rancherVersionsCacheTTL)
+}
+
+// handleSuseObservabilityVersions returns available chart versions for the
+// SUSE Observability Agent and Server from the Prime Helm index.
+// GET /api/suse-observability-versions?includePre=false
+func handleSuseObservabilityVersions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeErr(w, http.StatusMethodNotAllowed, "GET only")
+		return
+	}
+	includePre := r.URL.Query().Get("includePre") == "true"
+	cacheKey := fmt.Sprintf("suse-observability-versions:pre=%t", includePre)
+	if body, ok := genesisAPICache.get(cacheKey); ok {
+		writeCachedJSON(w, body, step1OptionsCacheTTL)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 45*time.Second)
+	defer cancel()
+	agent, err := listgenerator.ListSuseObservabilityChartVersions(ctx, listgenerator.SuseObservabilityAgentChartName, includePre)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "agent versions: "+err.Error())
+		return
+	}
+	server, err := listgenerator.ListSuseObservabilityChartVersions(ctx, listgenerator.SuseObservabilityServerChartName, includePre)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "server versions: "+err.Error())
+		return
+	}
+	body, err := json.Marshal(map[string]interface{}{
+		"agent":  agent,
+		"server": server,
+	})
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, "encode: "+err.Error())
+		return
+	}
+	genesisAPICache.set(cacheKey, body, step1OptionsCacheTTL)
+	writeCachedJSON(w, body, step1OptionsCacheTTL)
 }
 
 func fetchGitHubRancherReleases(ctx context.Context, includeRC bool) ([]rancherVersionInfo, error) {
@@ -901,6 +943,8 @@ func handleGenerate(w http.ResponseWriter, r *http.Request) {
 		}
 		cc.includeSuseObservability = req.IncludeSuseObservability
 		cc.includeSuseObservabilityServer = req.IncludeSuseObservabilityServer
+		cc.suseObservabilityAgentVersion = strings.TrimSpace(req.SuseObservabilityAgentVersion)
+		cc.suseObservabilityServerVersion = strings.TrimSpace(req.SuseObservabilityServerVersion)
 		cc.keepChartCache = true // serve mode: reuse chart clones across generate requests
 		cc.appCollectionAPIUser = req.AppCollectionAPIUser
 		cc.appCollectionAPIPassword = req.AppCollectionAPIPassword

@@ -30,7 +30,7 @@ func Test_FetchSuseObservabilityAgentImages_Live(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	images, version, err := FetchSuseObservabilityAgentImages(ctx)
+	images, version, err := FetchSuseObservabilityAgentImages(ctx, "")
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}
@@ -55,13 +55,38 @@ func Test_FetchSuseObservabilityAgentImages_Live(t *testing.T) {
 	t.Logf("version=%s images=%d", version, len(images))
 }
 
+func Test_ListSuseObservabilityChartVersions_Live(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	agent, err := ListSuseObservabilityChartVersions(ctx, SuseObservabilityAgentChartName, false)
+	if err != nil {
+		t.Fatalf("agent versions: %v", err)
+	}
+	if len(agent) < 1 {
+		t.Fatal("expected at least one agent version")
+	}
+	server, err := ListSuseObservabilityChartVersions(ctx, SuseObservabilityServerChartName, false)
+	if err != nil {
+		t.Fatalf("server versions: %v", err)
+	}
+	if len(server) < 1 {
+		t.Fatal("expected at least one server version")
+	}
+	// Pinning the first listed version should resolve.
+	_, url, err := ResolveSuseObservabilityChart(ctx, SuseObservabilityAgentChartName, agent[0])
+	if err != nil || url == "" {
+		t.Fatalf("resolve agent %q: url=%q err=%v", agent[0], url, err)
+	}
+	t.Logf("agent[0]=%s server[0]=%s", agent[0], server[0])
+}
+
 func Test_FetchSuseObservabilityServerImages_Live(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
-	images, version, err := FetchSuseObservabilityServerImages(ctx)
+	images, version, err := FetchSuseObservabilityServerImages(ctx, "")
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
 	}

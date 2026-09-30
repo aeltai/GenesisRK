@@ -2,6 +2,7 @@
 import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
 import type { Step1OptionsResponse } from '../types/genesis'
 import type { RancherVersionInfo } from '../api/genesis'
+import { fetchSuseObservabilityVersions } from '../api/genesis'
 import LoadingShapes from './LoadingShapes.vue'
 import { CNI_CATALOG, githubRelease, k3sRelease, rke2Release, rancherRelease, LOAD_BALANCER_OPTIONS, cniIconUrl, type LoadBalancerOption } from '../utils/componentLinks'
 import { brandIcon } from '../utils/brandIcons'
@@ -42,7 +43,44 @@ const includeUIPluginCharts = defineModel<boolean>('includeUIPluginCharts', { de
 const includeCertManager = defineModel<boolean>('includeCertManager', { default: true })
 const includeSuseObservability = defineModel<boolean>('includeSuseObservability', { default: false })
 const includeSuseObservabilityServer = defineModel<boolean>('includeSuseObservabilityServer', { default: false })
+const suseObservabilityAgentVersion = defineModel<string>('suseObservabilityAgentVersion', { default: '' })
+const suseObservabilityServerVersion = defineModel<string>('suseObservabilityServerVersion', { default: '' })
 const appUser = defineModel<string>('appUser', { default: '' })
+
+const o11yAgentVersions = ref<string[]>([])
+const o11yServerVersions = ref<string[]>([])
+const o11yVersionsLoading = ref(false)
+const o11yVersionsError = ref('')
+
+async function ensureO11yVersions() {
+  if (o11yAgentVersions.value.length && o11yServerVersions.value.length) return
+  o11yVersionsLoading.value = true
+  o11yVersionsError.value = ''
+  try {
+    const data = await fetchSuseObservabilityVersions(false)
+    o11yAgentVersions.value = data.agent || []
+    o11yServerVersions.value = data.server || []
+    if (!suseObservabilityAgentVersion.value && o11yAgentVersions.value[0]) {
+      suseObservabilityAgentVersion.value = o11yAgentVersions.value[0]
+    }
+    if (!suseObservabilityServerVersion.value && o11yServerVersions.value[0]) {
+      suseObservabilityServerVersion.value = o11yServerVersions.value[0]
+    }
+  } catch (e) {
+    o11yVersionsError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    o11yVersionsLoading.value = false
+  }
+}
+
+watch(
+  [includeSuseObservability, includeSuseObservabilityServer],
+  ([agent, server]) => {
+    if (agent || server) void ensureO11yVersions()
+  },
+  { immediate: true },
+)
+
 const appPassword = defineModel<string>('appPassword', { default: '' })
 const distros = defineModel<string[]>('distros', { default: () => ['rke2'] })
 const cni = defineModel<string>('cni', { default: 'cni_calico' })
@@ -523,10 +561,33 @@ onUnmounted(() => {
         <input v-model="includeSuseObservability" type="checkbox" />
         Include SUSE Observability Agent
       </label>
+      <div v-if="includeSuseObservability" class="o11y-version-row">
+        <label class="o11y-version-label">Agent chart version</label>
+        <select
+          v-model="suseObservabilityAgentVersion"
+          class="input inline o11y-version-select"
+          :disabled="o11yVersionsLoading || !o11yAgentVersions.length"
+        >
+          <option v-for="v in o11yAgentVersions" :key="'agent-' + v" :value="v">{{ v }}</option>
+        </select>
+        <span v-if="o11yVersionsLoading" class="field-hint">Loading versions…</span>
+      </div>
       <label class="checkbox-label" title="Self-hosted SUSE Observability platform (suse-observability chart) — same images as o11y-get-images.sh (~37 images: ES, Kafka, HBase, ClickHouse, …). Not required just to run the Agent against SaaS/hosted Observability.">
         <input v-model="includeSuseObservabilityServer" type="checkbox" />
         Include SUSE Observability Server (self-hosted)
       </label>
+      <div v-if="includeSuseObservabilityServer" class="o11y-version-row">
+        <label class="o11y-version-label">Server chart version</label>
+        <select
+          v-model="suseObservabilityServerVersion"
+          class="input inline o11y-version-select"
+          :disabled="o11yVersionsLoading || !o11yServerVersions.length"
+        >
+          <option v-for="v in o11yServerVersions" :key="'server-' + v" :value="v">{{ v }}</option>
+        </select>
+        <span v-if="o11yVersionsLoading" class="field-hint">Loading versions…</span>
+      </div>
+      <p v-if="o11yVersionsError" class="source-warn">{{ o11yVersionsError }}</p>
       <label class="checkbox-label">
         <input v-model="includePartnerCharts" type="checkbox" />
         Include Partner Charts (rancher/partner-charts)
@@ -846,6 +907,21 @@ onUnmounted(() => {
   border: 1px dashed var(--border);
   border-radius: var(--radius-md);
   background: color-mix(in srgb, var(--panel) 90%, var(--bg));
+}
+.o11y-version-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin: -0.15rem 0 0.55rem 1.6rem;
+}
+.o11y-version-label {
+  font-size: 0.85rem;
+  color: var(--muted, #6b7280);
+}
+.o11y-version-select {
+  min-width: 10rem;
+  max-width: 16rem;
 }
 .rancher-version-field {
   flex-direction: column;

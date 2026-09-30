@@ -95,6 +95,8 @@ const genRequest = reactive<GenerateRequest>({
   includeCertManager: true,
   includeSuseObservability: false,
   includeSuseObservabilityServer: false,
+  suseObservabilityAgentVersion: '',
+  suseObservabilityServerVersion: '',
   appCollectionAPIUser: '',
   appCollectionAPIPassword: '',
   distros: ['rke2'],
@@ -424,6 +426,8 @@ function backToStep1() {
               v-model:include-cert-manager="genRequest.includeCertManager"
               v-model:include-suse-observability="genRequest.includeSuseObservability"
               v-model:include-suse-observability-server="genRequest.includeSuseObservabilityServer"
+              v-model:suse-observability-agent-version="genRequest.suseObservabilityAgentVersion"
+              v-model:suse-observability-server-version="genRequest.suseObservabilityServerVersion"
               v-model:app-user="genRequest.appCollectionAPIUser"
               v-model:app-password="genRequest.appCollectionAPIPassword"
               v-model:distros="genRequest.distros"

@@ -47,10 +47,11 @@ export function peekRancherVersionsCache(includeRC = false): RancherVersionInfo[
 export function peekStep1OptionsCache(
   rancherVersion: string,
   includeRC = false,
-  includeGitHubVersions = false
+  includeGitHubVersions = false,
+  includeDeprecatedPatches = false
 ): Step1OptionsResponse | null {
   return peekSessionCache<Step1OptionsResponse>(
-    `step1:${rancherVersion}:rc=${includeRC}:gh=${includeGitHubVersions}`,
+    `step1:${rancherVersion}:rc=${includeRC}:gh=${includeGitHubVersions}:dep=${includeDeprecatedPatches}`,
     STEP1_OPTIONS_TTL_MS
   )
 }
@@ -75,6 +76,10 @@ async function fetchCached<T>(key: string, ttlMs: number, fetcher: () => Promise
 export interface RancherVersionInfo {
   version: string
   date: string
+  /** Listed from rancher/rancher GitHub releases (community image lists). */
+  communityAvailable?: boolean
+  /** rancher-images.txt exists on prime.ribs.rancher.io. */
+  primeAvailable?: boolean
 }
 
 export async function fetchRancherVersions(includeRC = false): Promise<RancherVersionInfo[]> {
@@ -98,14 +103,16 @@ export async function fetchRancherVersions(includeRC = false): Promise<RancherVe
 export async function fetchStep1Options(
   rancherVersion: string,
   includeRC = false,
-  includeGitHubVersions = false
+  includeGitHubVersions = false,
+  includeDeprecatedPatches = false
 ): Promise<Step1OptionsResponse> {
-  const cacheKey = `step1:${rancherVersion}:rc=${includeRC}:gh=${includeGitHubVersions}`
+  const cacheKey = `step1:${rancherVersion}:rc=${includeRC}:gh=${includeGitHubVersions}:dep=${includeDeprecatedPatches}`
   return fetchCached(cacheKey, STEP1_OPTIONS_TTL_MS, async () => {
     const v = encodeURIComponent(rancherVersion)
     const rc = includeRC ? '&includeRC=true' : ''
     const gh = includeGitHubVersions ? '&includeGitHubVersions=true' : ''
-    const r = await fetch(`${API_BASE}/step1-options?rancher=${v}${rc}${gh}`)
+    const dep = includeDeprecatedPatches ? '&includeDeprecatedPatches=true' : ''
+    const r = await fetch(`${API_BASE}/step1-options?rancher=${v}${rc}${gh}${dep}`)
     if (!r.ok) {
       const err = await r.json().catch(() => ({ error: r.statusText }))
       throw new Error((err as { error?: string }).error || r.statusText)
@@ -122,6 +129,13 @@ export async function generate(req: GenerateRequest): Promise<GenerateResponse> 
     k3sVersions: distros.includes('k3s') ? req.k3sVersions.join(',') : '',
     rke2Versions: distros.includes('rke2') ? req.rke2Versions.join(',') : '',
     rkeVersions: '',
+  }
+  // Multi-CNI: when cni is a comma-joined list, send the array as cnis (backend
+  // prefers CNIs over CNI). Keep cni for backward compatibility.
+  if ((!req.cnis || req.cnis.length === 0) && req.cni && req.cni.includes(',')) {
+    payload.cnis = req.cni.split(',').map((c) => c.trim()).filter(Boolean)
+  } else if (req.cnis && req.cnis.length > 0) {
+    payload.cnis = req.cnis
   }
   if (req.rancherVersions?.length) {
     payload.rancherVersions = req.rancherVersions
@@ -143,17 +157,18 @@ export async function generate(req: GenerateRequest): Promise<GenerateResponse> 
 export async function fetchStep1OptionsMerged(
   rancherVersions: string[],
   includeRC: boolean,
-  includeGitHubVersions: boolean
+  includeGitHubVersions: boolean,
+  includeDeprecatedPatches: boolean
 ): Promise<Step1OptionsResponse> {
   if (rancherVersions.length === 0) {
     return { hasRKE1: false, capabilities: {}, details: { kdmUrl: '', imageListSource: '' } }
   }
   if (rancherVersions.length === 1) {
     const v = rancherVersions[0]
-    return v ? fetchStep1Options(v, includeRC, includeGitHubVersions) : Promise.resolve({ hasRKE1: false, capabilities: {}, details: { kdmUrl: '', imageListSource: '' } })
+    return v ? fetchStep1Options(v, includeRC, includeGitHubVersions, includeDeprecatedPatches) : Promise.resolve({ hasRKE1: false, capabilities: {}, details: { kdmUrl: '', imageListSource: '' } })
   }
   const results = await Promise.all(
-    rancherVersions.map((v) => fetchStep1Options(v, includeRC, includeGitHubVersions))
+    rancherVersions.map((v) => fetchStep1Options(v, includeRC, includeGitHubVersions, includeDeprecatedPatches))
   )
   const first = results[0]
   const merged: Step1OptionsResponse = {
@@ -190,19 +205,52 @@ export async function fetchLogs(): Promise<string[]> {
   return data.lines ?? []
 }
 
+export interface ProgressResponse {
+  active: boolean
+  percent: number
+  phase: string
+  detail?: string
+  current?: number
+  total?: number
+}
+
+export async function fetchProgress(): Promise<ProgressResponse & { available?: boolean }> {
+  const r = await fetch(`${API_BASE}/progress`)
+  if (!r.ok) return { active: false, percent: 0, phase: 'Idle', available: false }
+  const data = (await r.json()) as ProgressResponse
+  return { ...data, available: true }
+}
+
 export type AvailabilityResult = Record<string, { status: string; detail: string; sizeBytes?: number }>
 
-export async function checkAvailability(images: string[]): Promise<AvailabilityResult> {
+export async function checkAvailability(images: string[], arch = 'amd64'): Promise<AvailabilityResult> {
   const r = await fetch(`${API_BASE}/check-availability`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ images }),
+    body: JSON.stringify({ images, arch }),
   })
   if (!r.ok) {
     const err = await r.json().catch(() => ({ error: r.statusText }))
     throw new Error((err as { error?: string }).error || r.statusText)
   }
   const data = await r.json() as { results: AvailabilityResult }
+  return data.results
+}
+
+export type ImageSizeResult = Record<string, { sizeBytes?: number; arch?: string; status: string; detail?: string }>
+
+/** Fetch compressed linux/<arch> sizes for the given images, independent of availability. */
+export async function fetchImageSizes(images: string[], arch = 'amd64'): Promise<ImageSizeResult> {
+  const r = await fetch(`${API_BASE}/image-sizes`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ images, arch }),
+  })
+  if (!r.ok) {
+    const err = await r.json().catch(() => ({ error: r.statusText }))
+    throw new Error((err as { error?: string }).error || r.statusText)
+  }
+  const data = await r.json() as { results: ImageSizeResult }
   return data.results
 }
 
@@ -239,10 +287,40 @@ export async function exportImageList(req: ExportRequest): Promise<Blob> {
   return r.blob()
 }
 
+export interface SuseObservabilityVersionsResponse {
+  agent: string[]
+  server: string[]
+}
+
+/** Chart versions from charts.rancher.com prime/suse-observability index. */
+export async function fetchSuseObservabilityVersions(includePre = false): Promise<SuseObservabilityVersionsResponse> {
+  const key = `suse-observability-versions:pre=${includePre}`
+  const cached = cacheGet<SuseObservabilityVersionsResponse>(key, STEP1_OPTIONS_TTL_MS)
+  if (cached) return cached
+  const existing = inflight.get(key)
+  if (existing) return existing as Promise<SuseObservabilityVersionsResponse>
+  const p = (async () => {
+    const r = await fetch(`${API_BASE}/suse-observability-versions?includePre=${includePre}`)
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({ error: r.statusText }))
+      throw new Error((err as { error?: string }).error || r.statusText)
+    }
+    const data = (await r.json()) as SuseObservabilityVersionsResponse
+    cacheSet(key, data)
+    return data
+  })().finally(() => inflight.delete(key))
+  inflight.set(key, p)
+  return p
+}
+
 export interface ScanStatusResponse {
   status: 'running' | 'completed' | 'failed'
   error?: string
   summary?: { critical: number; high: number; medium: number; low: number }
+  phase?: string
+  percent?: number
+  current?: number
+  total?: number
 }
 
 export async function startScan(images: string[]): Promise<{ scanJobId: string }> {
