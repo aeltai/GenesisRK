@@ -3030,24 +3030,10 @@ func (cc *genesisCmd) finish() error {
 		k3sVersions  = make([]string, 0)
 	)
 
-	var needUpdateWebhook bool
-
-	if cc.isRPMGC {
-		res, err := utils.SemverCompare(cc.rancherVersion, "v2.7.2")
-		if err != nil {
-			return fmt.Errorf("failed to compare version [%v] with [v2.7.2]: %w",
-				cc.rancherVersion, err)
-		}
-		needUpdateWebhook = res > 0
-	}
+	// NOTE: Do NOT rewrite rancher/rancher-webhook → cnrancher/rancher-webhook.
+	// That Hangar generate-list behavior is for China Prime Manager GC only.
+	// Genesis "Rancher Prime" is international (prime.ribs / registry.rancher.com).
 	for img := range cc.generator.LinuxImages {
-		if needUpdateWebhook &&
-			utils.GetImageName(img) == "rancher-webhook" &&
-			utils.GetProjectName(img) == "rancher" {
-			oldImg := img
-			img = utils.ReplaceProjectName(img, "cnrancher")
-			logrus.Infof("Replaced %q to %q", oldImg, img)
-		}
 		imgWithRegistry := img
 		if cc.registry != "" {
 			imgWithRegistry = utils.ConstructRegistry(img, cc.registry)
