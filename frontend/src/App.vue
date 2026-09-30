@@ -450,10 +450,14 @@ function backToStep1() {
               </ul>
             </div>
             <div v-if="genRequest.cni" class="details-section">
-              <h4 class="details-heading">CNI — {{ genRequest.cni.replace('cni_', '').replace('_', ' ') }}</h4>
+              <h4 class="details-heading">CNI — {{ genRequest.cni.split(',').map((c) => c.replace(/^cni_/, '')).join(', ') }}</h4>
               <ul class="details-links">
-                <li><a :href="cniDocs(genRequest.cni)" target="_blank" rel="noopener noreferrer">Documentation</a></li>
-                <li v-if="cniRelease(genRequest.cni)"><a :href="cniRelease(genRequest.cni)" target="_blank" rel="noopener noreferrer">Upstream releases</a></li>
+                <li v-for="cniId in genRequest.cni.split(',').filter(Boolean)" :key="cniId">
+                  <a :href="cniDocs(cniId)" target="_blank" rel="noopener noreferrer">{{ cniId.replace(/^cni_/, '') || 'All' }} docs</a>
+                  <template v-if="cniRelease(cniId)">
+                    · <a :href="cniRelease(cniId)" target="_blank" rel="noopener noreferrer">releases</a>
+                  </template>
+                </li>
               </ul>
             </div>
             <div class="details-section">

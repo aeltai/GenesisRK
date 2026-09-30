@@ -103,10 +103,6 @@ const cniCards = computed(() =>
   }))
 )
 
-// CNI is multi-select only when BOTH K3s and RKE2 are selected (Flannel is K3s-only;
-// Canal/Calico/Cilium apply to RKE2). With a single distro it stays single-select.
-const cniMulti = computed(() => distros.value.length === 2)
-
 const cniSelectedSet = computed(() => {
   const s = new Set<string>()
   for (const part of (cni.value || '').split(',')) {
@@ -116,26 +112,24 @@ const cniSelectedSet = computed(() => {
 })
 
 function isCniActive(id: string): boolean {
-  if (cniMulti.value) {
-    if (id === 'cni') return cni.value === 'cni'
-    if (id === '') return cni.value === ''
-    return cniSelectedSet.value.has(id)
-  }
-  return cni.value === id
+  if (id === 'cni') return cni.value === 'cni'
+  if (id === '') return cni.value === ''
+  if (cni.value === 'cni') return false
+  return cniSelectedSet.value.has(id)
 }
 
 function selectCni(id: string) {
-  if (!cniMulti.value || id === 'cni' || id === '') {
-    // single-select, or the special "All CNI" / "None" options (always exclusive)
+  // "All CNI" / "None" remain exclusive shortcuts
+  if (id === 'cni' || id === '') {
     cni.value = id
     return
   }
-  // multi-select: toggle membership, starting from the specific selection
   const set = new Set<string>(
     cni.value === 'cni' || cni.value === '' ? [] : cniSelectedSet.value
   )
   if (set.has(id)) set.delete(id)
   else set.add(id)
+  // Keep at least one concrete CNI when clearing would empty the set — fall back to None
   cni.value = [...set].sort().join(',')
 }
 
@@ -197,19 +191,17 @@ watch(
   () => {
     const opts = cniOptions.value
     const validIDs = new Set(opts.map((o) => o.id))
-    const multi = distros.value.length === 2
-    if (multi) {
-      // Keep only still-valid specific selections; drop "All"/"None" pseudo-values.
+    // Always multi-select: keep still-valid specific CNIs; drop invalid / All / empty.
+    if (cni.value === 'cni' || cni.value === '') {
+      // keep exclusive All/None as-is if still offered
+      if (!validIDs.has(cni.value) && opts[0]) cni.value = opts[0].id
+    } else {
       const kept: string[] = []
       for (const part of (cni.value || '').split(',')) {
         if (part && part !== 'cni' && validIDs.has(part) && !kept.includes(part)) kept.push(part)
       }
       cni.value = kept.sort().join(',')
       if (!kept.length && opts[0]) cni.value = opts[0].id
-    } else {
-      const valid = validIDs.has(cni.value)
-      const first = opts[0]
-      if (!valid && first) cni.value = first.id
     }
     const d = distros.value
     if (!d.includes('k3s')) {
@@ -708,8 +700,8 @@ onUnmounted(() => {
 
     <div v-if="distros.length > 0" class="field cni-field">
       <label>Container Network (CNI)</label>
-      <p v-if="cniMulti" class="field-note">
-        <span class="cni-multi-hint">Both distros selected — pick one or more CNIs.</span>
+      <p class="field-note">
+        <span class="cni-multi-hint">Select one or more to include their images. A cluster runs one CNI; packing several is fine for air-gap lists.</span>
       </p>
       <div class="option-cards cni-cards">
         <button
