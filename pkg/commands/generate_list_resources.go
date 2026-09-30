@@ -36,8 +36,11 @@ const (
 	RancherPrimeSystemChartsRepo = "https://github.com/rancher/system-charts"
 	KontainerDriverMetadataURL   = "https://releases.rancher.com/kontainer-driver-metadata"
 
-	// Rancher Prime Registry image lists (rancher-images.txt, k3s-images.txt, rke2-images-all.linux-amd64.txt)
 	PrimeImageListBaseURL = "https://prime.ribs.rancher.io"
+
+	// Partner and UI plugin chart repos (branch "main" for both)
+	RancherPartnerChartsRepo  = "https://github.com/rancher/partner-charts"
+	RancherUIPluginChartsRepo = "https://github.com/rancher/ui-plugin-charts"
 
 	// Rancher Prime GC
 	RancherPrimeGCChartsRepo       = "https://github.com/cnrancher/pandaria-catalog"
@@ -83,6 +86,31 @@ func addRancherPrimeSystemCharts(
 	}{
 		Type:   chartimages.RepoTypeSystem,
 		Branch: branch,
+	}
+}
+
+// addRancherPartnerCharts adds the rancher/partner-charts repo (branch main)
+// as an opt-in chart source. Partner charts have no rancher-version
+// constraints; the latest version of each chart is used.
+func addRancherPartnerCharts(o *listgenerator.GeneratorOption) {
+	o.ChartURLs[RancherPartnerChartsRepo] = struct {
+		Type   chartimages.ChartRepoType
+		Branch string
+	}{
+		Type:   chartimages.RepoTypePartner,
+		Branch: "main",
+	}
+}
+
+// addRancherUIPluginCharts adds the rancher/ui-plugin-charts repo (branch
+// main) as an opt-in chart source.
+func addRancherUIPluginCharts(o *listgenerator.GeneratorOption) {
+	o.ChartURLs[RancherUIPluginChartsRepo] = struct {
+		Type   chartimages.ChartRepoType
+		Branch string
+	}{
+		Type:   chartimages.RepoTypeUIPlugins,
+		Branch: "main",
 	}
 }
 
@@ -189,10 +217,29 @@ func GetKDMURLForDisplay(version string, isRPMGC bool, dev bool) string {
 	return fmt.Sprintf("%v/%v/data.json", KontainerDriverMetadataURL, branch)
 }
 
-// GetImageListSourceForDisplay returns a short description of where K3s/RKE2/rancher image lists are fetched (for TUI Details).
-func GetImageListSourceForDisplay(isRPMGC bool) string {
-	if isRPMGC {
-		return PrimeImageListBaseURL + " (rancher-images.txt, k3s-images.txt, rke2-images-all.linux-amd64.txt)"
+// GetRancherImagesTxtURL returns the official rancher-images.txt release asset
+// URL for the given Rancher version (community source for core images).
+func GetRancherImagesTxtURL(version string) string {
+	if !strings.HasPrefix(version, "v") {
+		version = "v" + version
 	}
-	return "GitHub (k3s-io/k3s, rancher/rke2)"
+	return fmt.Sprintf(
+		"https://github.com/rancher/rancher/releases/download/%s/rancher-images.txt", version)
+}
+
+// GetPrimeRancherImagesTxtURL returns rancher-images.txt on Rancher Prime Registry.
+func GetPrimeRancherImagesTxtURL(version string) string {
+	version = strings.TrimPrefix(version, "v")
+	return fmt.Sprintf("%s/rancher/v%s/rancher-images.txt", PrimeImageListBaseURL, version)
+}
+
+// GetImageListSourceForDisplay returns a short description of configured image list sources.
+func GetImageListSourceForDisplay(useCommunity, usePrime bool) string {
+	if useCommunity && usePrime {
+		return "GitHub core allowlist + " + PrimeImageListBaseURL + " (K3s/RKE2 per version, core allowlist)"
+	}
+	if usePrime {
+		return PrimeImageListBaseURL + " (K3s/RKE2 per selected version + core allowlist)"
+	}
+	return "GitHub (k3s-io/k3s, rancher/rke2 per version + rancher-images.txt core allowlist)"
 }

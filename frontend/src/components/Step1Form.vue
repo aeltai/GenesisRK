@@ -492,7 +492,7 @@ onUnmounted(() => {
             <span class="source-detail">GitHub releases</span>
           </span>
         </label>
-        <label class="checkbox-label source-card" :class="{ active: isRPMGC }" title="prime.ribs.rancher.io — curated/certified lists for SUSE Rancher Prime air-gap installs.">
+        <label class="checkbox-label source-card" :class="{ active: isRPMGC }" title="prime.ribs.rancher.io — K3s/RKE2 image lists for your selected versions + allowlisted Rancher core images (same policy as Community).">
           <input v-model="isRPMGC" type="checkbox" />
           <img :src="rancherEditionIcon(true)" alt="" class="source-edition-icon" />
           <span class="source-card-body">
@@ -502,7 +502,7 @@ onUnmounted(() => {
         </label>
       </div>
       <p v-if="!includeCommunityImageLists && !isRPMGC" class="source-warn">Select at least one image list source.</p>
-      <p class="source-note" title="When both are on, K3s/RKE2 come from Prime; Community still adds GitHub rancher-images.txt (falls back to prime.ribs if missing). KDM and charts are the same either way.">Enable both to merge lists.</p>
+      <p class="source-note" title="Both use the same allowlist for Rancher core images. Prime also pulls K3s/RKE2 lists from prime.ribs for the versions you selected — not the full Rancher matrix.">Enable both to merge Community + Prime sources.</p>
       <div v-if="isRPMGC && distros.includes('rke2')" class="prime-patcher-hint">
         <strong>rke2-patcher available</strong> — patched CVE-fixed images for Prime RKE2. Commands in Step 3.
       </div>
